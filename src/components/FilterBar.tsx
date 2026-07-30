@@ -29,21 +29,11 @@ export const FilterBar: React.FC<FilterBarProps> = ({
   const [isFieldsOpen, setIsFieldsOpen] = useState(false);
   const [isAudiencesOpen, setIsAudiencesOpen] = useState(false);
 
-  // Compute all available fields (custom taxonomy + any found in presentations)
-  const availableFields = Array.from(
-    new Set([
-      ...allFields,
-      ...presentations.flatMap((p) => p.fields || []),
-    ])
-  ).sort();
+  // Compute all available fields from managed taxonomy
+  const availableFields = Array.from(new Set(allFields)).sort();
 
-  // Compute all available target audiences
-  const availableAudiences = Array.from(
-    new Set([
-      ...allTargetAudiences,
-      ...presentations.flatMap((p) => p.targetAudiences || []),
-    ])
-  ).sort();
+  // Compute all available target audiences from managed taxonomy
+  const availableAudiences = Array.from(new Set(allTargetAudiences)).sort();
 
   // Count helper
   const getFieldCount = (field: string) =>
