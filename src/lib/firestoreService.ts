@@ -123,7 +123,7 @@ export async function loadPresentationAssets(presId: string): Promise<{ pdfUrl?:
       // Check chunked pdf
       let chunks: string[] = [];
       let i = 0;
-      while (i < 20) {
+      while (i < 200) {
         const chunkDoc = await getDoc(doc(db, 'presentation_assets', `${presId}_pdf_${i}`));
         if (!chunkDoc.exists()) break;
         chunks.push(chunkDoc.data().chunk);
@@ -136,7 +136,7 @@ export async function loadPresentationAssets(presId: string): Promise<{ pdfUrl?:
 
     // Try slide images
     let idx = 0;
-    while (idx < 50) {
+    while (idx < 100) {
       const slideDoc = await getDoc(doc(db, 'presentation_assets', `${presId}_slide_${idx}`));
       if (!slideDoc.exists()) break;
       extractedImages.push(slideDoc.data().data);

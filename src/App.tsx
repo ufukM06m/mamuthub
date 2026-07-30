@@ -864,10 +864,20 @@ export default function App() {
     } catch {
       // ignore
     }
+    setCurrentView('panel');
+    setSelectedCategory(null);
+    setSelectedFields([]);
+    setSelectedTargetAudiences([]);
+    setSearchQuery('');
     setCurrentUser(null);
   };
 
   const handleLoginSuccess = (user: User, remember: boolean = false) => {
+    setCurrentView('panel');
+    setSelectedCategory(null);
+    setSelectedFields([]);
+    setSelectedTargetAudiences([]);
+    setSearchQuery('');
     setCurrentUser(user);
     setUsers((prev) => prev.map((u) => (u.id === user.id ? user : u)));
     try {
@@ -881,6 +891,35 @@ export default function App() {
     } catch {
       // ignore
     }
+
+    // Force reload presentations from local IndexedDB on login
+    getLocalPresentations<Presentation>().then((localPres) => {
+      if (localPres && localPres.length > 0) {
+        const deletedIds = getDeletedPresIds();
+        const mockIds = ['pres-1', 'pres-2', 'pres-3', 'pres-4'];
+        setPresentations((prev) => {
+          const map = new Map<string, Presentation>();
+          prev.forEach((p) => {
+            if (!deletedIds.includes(p.id) && !mockIds.includes(p.id)) map.set(p.id, p);
+          });
+          localPres.forEach((lp) => {
+            if (deletedIds.includes(lp.id) || mockIds.includes(lp.id)) return;
+            const existing = map.get(lp.id);
+            if (existing) {
+              map.set(lp.id, {
+                ...existing,
+                ...lp,
+                extractedImages: lp.extractedImages || existing.extractedImages,
+                pdfUrl: lp.pdfUrl || existing.pdfUrl,
+              });
+            } else {
+              map.set(lp.id, lp);
+            }
+          });
+          return Array.from(map.values());
+        });
+      }
+    });
   };
 
   const getViewTitle = () => {
