@@ -81,7 +81,7 @@ export default function App() {
     }
   }, [users]);
 
-  // Clean up storage on logout
+  // Clean up storage on logout & purge legacy mock test data
   useEffect(() => {
     try {
       if (!currentUser) {
@@ -90,6 +90,14 @@ export default function App() {
       }
     } catch {
       // ignore
+    }
+
+    // Purge old mock test items once from Firestore and local storage
+    const mockIds = ['pres-1', 'pres-2', 'pres-3', 'pres-4'];
+    for (const mockId of mockIds) {
+      removeItem('presentations', mockId).catch(() => {});
+      deleteLocalPresentation(mockId).catch(() => {});
+      addDeletedPresId(mockId);
     }
   }, [currentUser]);
 
@@ -124,14 +132,15 @@ export default function App() {
   useEffect(() => {
     getLocalPresentations<Presentation>().then((localPres) => {
       const deletedIds = getDeletedPresIds();
+      const mockIds = ['pres-1', 'pres-2', 'pres-3', 'pres-4'];
       if (localPres && localPres.length > 0) {
         setPresentations((prev) => {
           const map = new Map<string, Presentation>();
           prev.forEach((p) => {
-            if (!deletedIds.includes(p.id)) map.set(p.id, p);
+            if (!deletedIds.includes(p.id) && !mockIds.includes(p.id)) map.set(p.id, p);
           });
           localPres.forEach((lp) => {
-            if (deletedIds.includes(lp.id)) return;
+            if (deletedIds.includes(lp.id) || mockIds.includes(lp.id)) return;
             const existing = map.get(lp.id);
             if (existing) {
               map.set(lp.id, {
@@ -155,20 +164,11 @@ export default function App() {
     const unsubPres = subscribeToCollection<Presentation>('presentations', [], (firestorePres) => {
       getLocalPresentations<Presentation>().then(async (localPres) => {
         const deletedIds = getDeletedPresIds();
+        const mockIds = ['pres-1', 'pres-2', 'pres-3', 'pres-4'];
         const map = new Map<string, Presentation>();
 
-        const validFirestore = firestorePres.filter((fp) => !deletedIds.includes(fp.id));
-        const validLocal = localPres.filter((lp) => !deletedIds.includes(lp.id));
-
-        // If Firestore is empty AND local storage is empty AND test data was not explicitly deleted, seed initial sample data
-        if (firestorePres.length === 0 && validLocal.length === 0 && !deletedIds.includes('pres-1')) {
-          for (const initP of initialPresentations) {
-            const sanitized = await sanitizePresentationForFirestore(initP);
-            await upsertItem('presentations', sanitized);
-            await saveLocalPresentation(initP);
-          }
-          return;
-        }
+        const validFirestore = firestorePres.filter((fp) => !deletedIds.includes(fp.id) && !mockIds.includes(fp.id));
+        const validLocal = localPres.filter((lp) => !deletedIds.includes(lp.id) && !mockIds.includes(lp.id));
 
         // 1. First add local user presentations from IndexedDB (they hold complete binary PDF data and local edits)
         validLocal.forEach((lp) => {
@@ -179,7 +179,7 @@ export default function App() {
         validFirestore.forEach((fp) => {
           const lp = map.get(fp.id);
           if (lp) {
-            map.set(fp.id, {
+            const merged = {
               ...fp,
               ...lp, // local user edits take priority
               pdfUrl: lp.pdfUrl || fp.pdfUrl,
@@ -187,17 +187,18 @@ export default function App() {
                 lp.extractedImages && lp.extractedImages.length > 0
                   ? lp.extractedImages
                   : fp.extractedImages,
-            });
+            };
+            map.set(fp.id, merged);
+            saveLocalPresentation(merged);
           } else {
             map.set(fp.id, fp);
             saveLocalPresentation(fp);
           }
         });
 
-        // 3. For any user-created local presentation not yet in Firestore, upload it (skipping mock pres-1..4)
+        // 3. For any user-created local presentation not yet in Firestore, upload it
         for (const lp of validLocal) {
-          const isMock = ['pres-1', 'pres-2', 'pres-3', 'pres-4'].includes(lp.id);
-          if (!isMock && !validFirestore.some((fp) => fp.id === lp.id)) {
+          if (!validFirestore.some((fp) => fp.id === lp.id)) {
             const sanitized = await sanitizePresentationForFirestore(lp);
             await upsertItem('presentations', sanitized);
           }

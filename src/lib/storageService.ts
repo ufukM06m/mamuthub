@@ -67,7 +67,7 @@ export function clearDeletedPresIds(): void {
 }
 
 // Save full presentation (including large base64 pdfUrl and extractedImages) to IndexedDB
-export async function saveLocalPresentation<T extends { id: string }>(presentation: T): Promise<void> {
+export async function saveLocalPresentation<T extends { id: string; pdfUrl?: string; extractedImages?: string[] }>(presentation: T): Promise<void> {
   // If user un-deletes or re-saves, remove from deleted IDs
   try {
     const deleted = getDeletedPresIds();
@@ -84,9 +84,30 @@ export async function saveLocalPresentation<T extends { id: string }>(presentati
     return new Promise((resolve, reject) => {
       const tx = db.transaction(PRESENTATIONS_STORE, 'readwrite');
       const store = tx.objectStore(PRESENTATIONS_STORE);
-      const req = store.put(presentation);
-      req.onsuccess = () => resolve();
-      req.onerror = () => reject(req.error);
+      const getReq = store.get(presentation.id);
+      getReq.onsuccess = () => {
+        const existing = getReq.result as T | undefined;
+        let toSave = presentation;
+        if (existing) {
+          toSave = {
+            ...existing,
+            ...presentation,
+            pdfUrl: presentation.pdfUrl || existing.pdfUrl,
+            extractedImages:
+              (presentation.extractedImages && presentation.extractedImages.length >= (existing.extractedImages?.length || 0))
+                ? presentation.extractedImages
+                : (existing.extractedImages || presentation.extractedImages),
+          };
+        }
+        const putReq = store.put(toSave);
+        putReq.onsuccess = () => resolve();
+        putReq.onerror = () => reject(putReq.error);
+      };
+      getReq.onerror = () => {
+        const req = store.put(presentation);
+        req.onsuccess = () => resolve();
+        req.onerror = () => reject(req.error);
+      };
     });
   } catch (err) {
     console.warn('Failed to save presentation to IndexedDB:', err);
