@@ -145,20 +145,34 @@ export default function App() {
   // Firestore Subscriptions
   useEffect(() => {
     const unsubPres = subscribeToCollection<Presentation>('presentations', initialPresentations, (firestorePres) => {
-      // Merge firestore with local IndexedDB presentations
+      // Merge firestore with local IndexedDB presentations using full outer join
       getLocalPresentations<Presentation>().then((localPres) => {
-        const localMap = new Map(localPres.map((lp) => [lp.id, lp]));
-        const merged = firestorePres.map((fp) => {
-          const lp = localMap.get(fp.id);
-          if (lp) {
-            return {
-              ...fp,
-              extractedImages: lp.extractedImages || fp.extractedImages,
-              pdfUrl: lp.pdfUrl || fp.pdfUrl,
-            };
-          }
-          return fp;
+        const map = new Map<string, Presentation>();
+
+        // 1. Add local presentations from IndexedDB (preserves user uploads)
+        localPres.forEach((lp) => {
+          map.set(lp.id, lp);
         });
+
+        // 2. Add or merge Firestore presentations
+        firestorePres.forEach((fp) => {
+          const existingLocal = map.get(fp.id);
+          if (existingLocal) {
+            map.set(fp.id, {
+              ...fp,
+              pdfUrl: existingLocal.pdfUrl || fp.pdfUrl,
+              extractedImages:
+                existingLocal.extractedImages && existingLocal.extractedImages.length > 0
+                  ? existingLocal.extractedImages
+                  : fp.extractedImages,
+            });
+          } else {
+            map.set(fp.id, fp);
+            saveLocalPresentation(fp);
+          }
+        });
+
+        const merged = Array.from(map.values());
         setPresentations(merged);
       });
     });
@@ -672,7 +686,8 @@ export default function App() {
   }) => {
     if (restored.presentations && Array.isArray(restored.presentations)) {
       setPresentations(restored.presentations);
-      replaceCollection('presentations', restored.presentations);
+      restored.presentations.forEach((p) => saveLocalPresentation(p));
+      replaceCollection('presentations', restored.presentations.map(sanitizePresentationForFirestore));
     }
     if (restored.categories && Array.isArray(restored.categories)) {
       setCategories(restored.categories);

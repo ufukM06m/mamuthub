@@ -20,16 +20,22 @@ export function subscribeToCollection<T extends { id: string }>(
     colRef,
     async (snapshot) => {
       if (snapshot.empty && initialDataIfEmpty && initialDataIfEmpty.length > 0) {
-        try {
-          const batch = writeBatch(db);
-          initialDataIfEmpty.forEach((item) => {
-            const docRef = doc(db, collectionName, item.id);
-            batch.set(docRef, item);
-          });
-          await batch.commit();
-        } catch (err) {
-          console.error(`Error seeding initial data for ${collectionName}:`, err);
+        const seedKey = `mamuthub_seeded_${collectionName}`;
+        if (!localStorage.getItem(seedKey)) {
+          localStorage.setItem(seedKey, 'true');
+          try {
+            const batch = writeBatch(db);
+            initialDataIfEmpty.forEach((item) => {
+              const docRef = doc(db, collectionName, item.id);
+              batch.set(docRef, item);
+            });
+            await batch.commit();
+            return;
+          } catch (err) {
+            console.error(`Error seeding initial data for ${collectionName}:`, err);
+          }
         }
+        onData([]);
       } else {
         const items = snapshot.docs.map((docSnap) => ({
           ...docSnap.data(),
