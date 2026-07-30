@@ -29,8 +29,49 @@ function openDB(): Promise<IDBDatabase> {
   });
 }
 
+// Get deleted presentation IDs from localStorage
+export function getDeletedPresIds(): string[] {
+  try {
+    const saved = localStorage.getItem('mamuthub_deleted_pres_ids');
+    return saved ? JSON.parse(saved) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function addDeletedPresId(id: string): void {
+  try {
+    const current = getDeletedPresIds();
+    if (!current.includes(id)) {
+      current.push(id);
+      localStorage.setItem('mamuthub_deleted_pres_ids', JSON.stringify(current));
+    }
+  } catch {
+    // ignore
+  }
+}
+
+export function clearDeletedPresIds(): void {
+  try {
+    localStorage.removeItem('mamuthub_deleted_pres_ids');
+  } catch {
+    // ignore
+  }
+}
+
 // Save full presentation (including large base64 pdfUrl and extractedImages) to IndexedDB
 export async function saveLocalPresentation<T extends { id: string }>(presentation: T): Promise<void> {
+  // If user un-deletes or re-saves, remove from deleted IDs
+  try {
+    const deleted = getDeletedPresIds();
+    if (deleted.includes(presentation.id)) {
+      const updated = deleted.filter((d) => d !== presentation.id);
+      localStorage.setItem('mamuthub_deleted_pres_ids', JSON.stringify(updated));
+    }
+  } catch {
+    // ignore
+  }
+
   try {
     const db = await openDB();
     return new Promise((resolve, reject) => {

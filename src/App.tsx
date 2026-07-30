@@ -36,7 +36,10 @@ import {
   saveLocalPresentation, 
   getLocalPresentations, 
   deleteLocalPresentation, 
-  sanitizePresentationForFirestore 
+  sanitizePresentationForFirestore,
+  getDeletedPresIds,
+  addDeletedPresId,
+  clearDeletedPresIds
 } from './lib/storageService';
 
 interface TaxonomyDoc {
@@ -119,11 +122,15 @@ export default function App() {
   // Load IndexedDB presentations on startup to preserve large PDF data URLs and images
   useEffect(() => {
     getLocalPresentations<Presentation>().then((localPres) => {
+      const deletedIds = getDeletedPresIds();
       if (localPres && localPres.length > 0) {
         setPresentations((prev) => {
           const map = new Map<string, Presentation>();
-          prev.forEach((p) => map.set(p.id, p));
+          prev.forEach((p) => {
+            if (!deletedIds.includes(p.id)) map.set(p.id, p);
+          });
           localPres.forEach((lp) => {
+            if (deletedIds.includes(lp.id)) return;
             const existing = map.get(lp.id);
             if (existing) {
               map.set(lp.id, {
@@ -145,30 +152,38 @@ export default function App() {
   // Firestore Subscriptions
   useEffect(() => {
     const unsubPres = subscribeToCollection<Presentation>('presentations', initialPresentations, (firestorePres) => {
-      // Merge firestore with local IndexedDB presentations using full outer join
       getLocalPresentations<Presentation>().then((localPres) => {
+        const deletedIds = getDeletedPresIds();
         const map = new Map<string, Presentation>();
 
-        // 1. Add local presentations from IndexedDB (preserves user uploads)
-        localPres.forEach((lp) => {
-          map.set(lp.id, lp);
-        });
+        const validFirestore = firestorePres.filter((fp) => !deletedIds.includes(fp.id));
+        const validLocal = localPres.filter((lp) => !deletedIds.includes(lp.id));
 
-        // 2. Add or merge Firestore presentations
-        firestorePres.forEach((fp) => {
-          const existingLocal = map.get(fp.id);
-          if (existingLocal) {
+        const localMap = new Map(validLocal.map((lp) => [lp.id, lp]));
+
+        // 1. Primary: Firestore documents (enriched with IndexedDB pdfUrl / extractedImages)
+        validFirestore.forEach((fp) => {
+          const lp = localMap.get(fp.id);
+          if (lp) {
             map.set(fp.id, {
               ...fp,
-              pdfUrl: existingLocal.pdfUrl || fp.pdfUrl,
+              pdfUrl: lp.pdfUrl || fp.pdfUrl,
               extractedImages:
-                existingLocal.extractedImages && existingLocal.extractedImages.length > 0
-                  ? existingLocal.extractedImages
+                lp.extractedImages && lp.extractedImages.length > 0
+                  ? lp.extractedImages
                   : fp.extractedImages,
             });
           } else {
             map.set(fp.id, fp);
             saveLocalPresentation(fp);
+          }
+        });
+
+        // 2. Secondary: Local uploads that haven't reached Firestore yet
+        validLocal.forEach((lp) => {
+          if (!map.has(lp.id)) {
+            map.set(lp.id, lp);
+            upsertItem('presentations', sanitizePresentationForFirestore(lp));
           }
         });
 
@@ -398,6 +413,7 @@ export default function App() {
 
   const handleDeletePresentation = (id: string) => {
     if (window.confirm('Bu sunumu silmek istediğinizden emin misiniz?')) {
+      addDeletedPresId(id);
       setPresentations((prev) => prev.filter((p) => p.id !== id));
       deleteLocalPresentation(id);
       removeItem('presentations', id);
@@ -685,6 +701,7 @@ export default function App() {
     clients?: Client[];
   }) => {
     if (restored.presentations && Array.isArray(restored.presentations)) {
+      clearDeletedPresIds();
       setPresentations(restored.presentations);
       restored.presentations.forEach((p) => saveLocalPresentation(p));
       replaceCollection('presentations', restored.presentations.map(sanitizePresentationForFirestore));
