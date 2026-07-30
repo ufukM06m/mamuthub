@@ -476,7 +476,7 @@ export default function App() {
     setIsUploadPdfModalOpen(true);
   };
 
-  const handleAddUploadedPresentation = (newPres: Presentation) => {
+  const handleAddUploadedPresentation = async (newPres: Presentation) => {
     const timeStamped: Presentation = {
       ...newPres,
       createdAt: newPres.createdAt || new Date().toISOString(),
@@ -484,11 +484,11 @@ export default function App() {
     };
     setPresentations((prev) => [timeStamped, ...prev.filter((p) => p.id !== timeStamped.id)]);
     setActiveStudioPresentation(timeStamped);
-    saveLocalPresentation(timeStamped);
-    upsertItem('presentations', sanitizePresentationForFirestore(timeStamped));
+    await saveLocalPresentation(timeStamped);
+    await upsertItem('presentations', sanitizePresentationForFirestore(timeStamped));
   };
 
-  const handleSavePresentation = (updated: Presentation) => {
+  const handleSavePresentation = async (updated: Presentation) => {
     const timeStamped: Presentation = {
       ...updated,
       updatedAt: new Date().toISOString(),
@@ -497,8 +497,8 @@ export default function App() {
     if (activeStudioPresentation?.id === timeStamped.id) {
       setActiveStudioPresentationState(timeStamped);
     }
-    saveLocalPresentation(timeStamped);
-    upsertItem('presentations', sanitizePresentationForFirestore(timeStamped));
+    await saveLocalPresentation(timeStamped);
+    await upsertItem('presentations', sanitizePresentationForFirestore(timeStamped));
   };
 
   // Category Handlers

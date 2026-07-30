@@ -44,7 +44,8 @@ export async function upsertItem<T extends { id: string }>(
 ) {
   try {
     const docRef = doc(db, collectionName, item.id);
-    await setDoc(docRef, item, { merge: true });
+    const cleanItem = JSON.parse(JSON.stringify(item));
+    await setDoc(docRef, cleanItem, { merge: true });
   } catch (err) {
     console.error(`Error saving item to ${collectionName}:`, err);
   }

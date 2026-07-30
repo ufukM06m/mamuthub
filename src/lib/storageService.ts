@@ -133,26 +133,33 @@ export async function deleteLocalPresentation(id: string): Promise<void> {
   }
 }
 
-// Create safe payload for Firestore by trimming/compressing huge base64 strings if over 800KB
+// Create safe payload for Firestore by stripping huge base64 strings and undefined values
 export function sanitizePresentationForFirestore<T extends Record<string, any>>(pres: T): T {
-  const jsonStr = JSON.stringify(pres);
-  // 800 KB safety boundary for 1MB Firestore limit
-  if (jsonStr.length < 800 * 1024) {
-    return pres;
+  // 1. Deep clone & auto-purge all undefined keys
+  const sanitized: Record<string, any> = JSON.parse(
+    JSON.stringify(pres, (key, value) => {
+      if (value === undefined) return undefined;
+      return value;
+    })
+  );
+
+  // 2. Strip huge PDF base64 data URLs for Firestore payload (stored permanently in local IndexedDB)
+  if (
+    typeof sanitized.pdfUrl === 'string' &&
+    (sanitized.pdfUrl.startsWith('data:') || sanitized.pdfUrl.length > 100 * 1024)
+  ) {
+    delete sanitized.pdfUrl;
   }
 
-  // If presentation object is too large due to extractedImages or pdfUrl, create a lightweight version for Firestore
-  const sanitized = { ...pres };
-  
-  // Keep thumbnail or first 1-2 slide images if extractedImages is huge
-  if (Array.isArray(sanitized.extractedImages) && sanitized.extractedImages.length > 3) {
-    sanitized.extractedImages = sanitized.extractedImages.slice(0, 3);
+  // 3. Keep thumbnail or first 2 slide images if extractedImages array is large
+  if (Array.isArray(sanitized.extractedImages) && sanitized.extractedImages.length > 2) {
+    sanitized.extractedImages = sanitized.extractedImages.slice(0, 2);
   }
 
-  // If pdfUrl is a huge base64 data URL, clear it in Firestore payload (it will stay in IndexedDB)
-  if (typeof sanitized.pdfUrl === 'string' && sanitized.pdfUrl.startsWith('data:') && sanitized.pdfUrl.length > 500 * 1024) {
-    sanitized.pdfUrl = undefined;
+  // 4. Ensure total payload size is safely under Firestore's 1MB limit (max 500KB)
+  if (JSON.stringify(sanitized).length > 500 * 1024) {
+    delete sanitized.extractedImages;
   }
 
-  return sanitized;
+  return sanitized as T;
 }
