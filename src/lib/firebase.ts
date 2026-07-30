@@ -1,6 +1,6 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getFirestore } from 'firebase/firestore';
-import { getAuth } from 'firebase/auth';
+import { getAuth, signInAnonymously } from 'firebase/auth';
 import { getStorage } from 'firebase/storage';
 import firebaseConfig from '../../firebase-applet-config.json';
 
@@ -12,4 +12,9 @@ export const db = firebaseConfig.firestoreDatabaseId
 
 export const auth = getAuth(app);
 export const storage = getStorage(app);
+
+// Authenticate anonymously so Firebase Storage & Firestore rules work without errors
+signInAnonymously(auth).catch((err) => {
+  console.warn('Firebase anonymous auth warning:', err);
+});
 

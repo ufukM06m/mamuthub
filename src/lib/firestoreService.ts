@@ -2,6 +2,7 @@ import {
   collection,
   doc,
   setDoc,
+  getDoc,
   deleteDoc,
   onSnapshot,
   getDocs,
@@ -79,3 +80,76 @@ export async function replaceCollection<T extends { id: string }>(
     console.error(`Error replacing collection ${collectionName}:`, err);
   }
 }
+
+// Save large presentation assets (base64 PDF data & slide images) to separate Firestore sub-documents
+export async function savePresentationAssets(presId: string, pdfUrl?: string, extractedImages?: string[]): Promise<void> {
+  try {
+    if (pdfUrl && pdfUrl.startsWith('data:')) {
+      const chunkSize = 250 * 1024;
+      if (pdfUrl.length <= chunkSize) {
+        await setDoc(doc(db, 'presentation_assets', `${presId}_pdf`), { data: pdfUrl, presId });
+      } else {
+        const totalChunks = Math.ceil(pdfUrl.length / chunkSize);
+        for (let i = 0; i < totalChunks; i++) {
+          const chunk = pdfUrl.slice(i * chunkSize, (i + 1) * chunkSize);
+          await setDoc(doc(db, 'presentation_assets', `${presId}_pdf_${i}`), { chunk, presId, index: i, total: totalChunks });
+        }
+      }
+    }
+    if (Array.isArray(extractedImages) && extractedImages.length > 0) {
+      for (let i = 0; i < extractedImages.length; i++) {
+        const img = extractedImages[i];
+        if (img && typeof img === 'string' && img.startsWith('data:')) {
+          await setDoc(doc(db, 'presentation_assets', `${presId}_slide_${i}`), { data: img, presId, slideIndex: i });
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('Failed to save presentation assets to Firestore:', err);
+  }
+}
+
+// Load presentation assets from Firestore when missing from main document or local IndexedDB
+export async function loadPresentationAssets(presId: string): Promise<{ pdfUrl?: string; extractedImages?: string[] }> {
+  try {
+    let pdfUrl: string | undefined;
+    let extractedImages: string[] = [];
+
+    // Try single doc pdf
+    const pdfDoc = await getDoc(doc(db, 'presentation_assets', `${presId}_pdf`));
+    if (pdfDoc.exists()) {
+      pdfUrl = pdfDoc.data().data;
+    } else {
+      // Check chunked pdf
+      let chunks: string[] = [];
+      let i = 0;
+      while (i < 20) {
+        const chunkDoc = await getDoc(doc(db, 'presentation_assets', `${presId}_pdf_${i}`));
+        if (!chunkDoc.exists()) break;
+        chunks.push(chunkDoc.data().chunk);
+        i++;
+      }
+      if (chunks.length > 0) {
+        pdfUrl = chunks.join('');
+      }
+    }
+
+    // Try slide images
+    let idx = 0;
+    while (idx < 50) {
+      const slideDoc = await getDoc(doc(db, 'presentation_assets', `${presId}_slide_${idx}`));
+      if (!slideDoc.exists()) break;
+      extractedImages.push(slideDoc.data().data);
+      idx++;
+    }
+
+    return {
+      pdfUrl: pdfUrl || undefined,
+      extractedImages: extractedImages.length > 0 ? extractedImages : undefined,
+    };
+  } catch (err) {
+    console.warn('Failed to load presentation assets from Firestore:', err);
+    return {};
+  }
+}
+
