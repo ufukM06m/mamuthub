@@ -4,14 +4,14 @@ import { User } from '../types';
 
 interface LoginScreenProps {
   users: User[];
-  onLoginSuccess: (user: User) => void;
+  onLoginSuccess: (user: User, remember: boolean) => void;
 }
 
 export const LoginScreen: React.FC<LoginScreenProps> = ({ users, onLoginSuccess }) => {
   const [email, setEmail] = useState<string>('');
   const [password, setPassword] = useState<string>('');
   const [showPassword, setShowPassword] = useState<boolean>(false);
-  const [rememberMe, setRememberMe] = useState<boolean>(true);
+  const [rememberMe, setRememberMe] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [forgotModalOpen, setForgotModalOpen] = useState<boolean>(false);
   const [forgotEmail, setForgotEmail] = useState<string>('');
@@ -46,7 +46,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ users, onLoginSuccess 
       lastLogin: new Date().toISOString().replace('T', ' ').substring(0, 16),
     };
 
-    onLoginSuccess(updatedUser);
+    onLoginSuccess(updatedUser, rememberMe);
   };
 
   const handleForgotSubmit = (e: React.FormEvent) => {

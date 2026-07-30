@@ -46,15 +46,17 @@ export default function App() {
 
   const [currentUser, setCurrentUser] = useState<User | null>(() => {
     try {
-      const saved = localStorage.getItem('mamuthub_auth_user');
-      if (saved) return JSON.parse(saved);
+      const savedLocal = localStorage.getItem('mamuthub_auth_user');
+      if (savedLocal) return JSON.parse(savedLocal);
+      const savedSession = sessionStorage.getItem('mamuthub_auth_user');
+      if (savedSession) return JSON.parse(savedSession);
       return null;
     } catch {
       return null;
     }
   });
 
-  // Save users & currentUser to localStorage
+  // Save users to localStorage
   useEffect(() => {
     try {
       localStorage.setItem('mamuthub_users', JSON.stringify(users));
@@ -63,12 +65,12 @@ export default function App() {
     }
   }, [users]);
 
+  // Clean up storage on logout
   useEffect(() => {
     try {
-      if (currentUser) {
-        localStorage.setItem('mamuthub_auth_user', JSON.stringify(currentUser));
-      } else {
+      if (!currentUser) {
         localStorage.removeItem('mamuthub_auth_user');
+        sessionStorage.removeItem('mamuthub_auth_user');
       }
     } catch {
       // ignore
@@ -587,12 +589,29 @@ export default function App() {
   };
 
   const handleLogout = () => {
+    try {
+      localStorage.removeItem('mamuthub_auth_user');
+      sessionStorage.removeItem('mamuthub_auth_user');
+    } catch {
+      // ignore
+    }
     setCurrentUser(null);
   };
 
-  const handleLoginSuccess = (user: User) => {
+  const handleLoginSuccess = (user: User, remember: boolean = false) => {
     setCurrentUser(user);
     setUsers((prev) => prev.map((u) => (u.id === user.id ? user : u)));
+    try {
+      if (remember) {
+        localStorage.setItem('mamuthub_auth_user', JSON.stringify(user));
+        sessionStorage.removeItem('mamuthub_auth_user');
+      } else {
+        sessionStorage.setItem('mamuthub_auth_user', JSON.stringify(user));
+        localStorage.removeItem('mamuthub_auth_user');
+      }
+    } catch {
+      // ignore
+    }
   };
 
   const getViewTitle = () => {
