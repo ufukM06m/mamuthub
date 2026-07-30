@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Layers, Lock, Mail, Eye, EyeOff, ShieldCheck, UserCheck, ArrowRight, Info, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { Layers, Lock, Mail, Eye, EyeOff, ShieldCheck, ArrowRight, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { User } from '../types';
 
 interface LoginScreenProps {
@@ -8,8 +8,8 @@ interface LoginScreenProps {
 }
 
 export const LoginScreen: React.FC<LoginScreenProps> = ({ users, onLoginSuccess }) => {
-  const [email, setEmail] = useState<string>('admin@mamuthub.com');
-  const [password, setPassword] = useState<string>('123');
+  const [email, setEmail] = useState<string>('');
+  const [password, setPassword] = useState<string>('');
   const [showPassword, setShowPassword] = useState<boolean>(false);
   const [rememberMe, setRememberMe] = useState<boolean>(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -46,16 +46,6 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ users, onLoginSuccess 
       lastLogin: new Date().toISOString().replace('T', ' ').substring(0, 16),
     };
 
-    onLoginSuccess(updatedUser);
-  };
-
-  const handleQuickLogin = (demoUser: User) => {
-    setEmail(demoUser.email);
-    setPassword(demoUser.password || '123');
-    const updatedUser: User = {
-      ...demoUser,
-      lastLogin: new Date().toISOString().replace('T', ' ').substring(0, 16),
-    };
     onLoginSuccess(updatedUser);
   };
 
@@ -168,47 +158,6 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ users, onLoginSuccess 
             <ArrowRight className="w-4 h-4" />
           </button>
         </form>
-
-        {/* Quick Demo Login Preset Section */}
-        <div className="pt-4 border-t border-slate-800/80 space-y-3">
-          <div className="flex items-center gap-1.5 text-xs text-slate-400 font-semibold uppercase tracking-wider">
-            <Info className="w-3.5 h-3.5 text-blue-400" />
-            <span>Hızlı Test Giriş Seçenekleri</span>
-          </div>
-
-          <div className="grid grid-cols-1 gap-2">
-            {users.map((u) => {
-              const roleBadge = 
-                u.role === 'admin' ? { label: 'Yönetici (Tam Yetki)', bg: 'bg-purple-500/10 text-purple-400 border-purple-500/20' } :
-                u.role === 'editor' ? { label: 'Editör (İçerik Yönetimi)', bg: 'bg-blue-500/10 text-blue-400 border-blue-500/20' } :
-                { label: 'İzleyici (Salt Okunur)', bg: 'bg-slate-500/10 text-slate-300 border-slate-500/20' };
-
-              return (
-                <button
-                  key={u.id}
-                  type="button"
-                  onClick={() => handleQuickLogin(u)}
-                  className="w-full flex items-center justify-between p-2.5 rounded-xl bg-slate-900/80 border border-slate-800 hover:border-slate-700 hover:bg-slate-800/60 transition-all text-left group"
-                >
-                  <div className="flex items-center gap-2.5 truncate">
-                    <div className="w-7 h-7 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center text-xs font-bold text-white shrink-0 group-hover:bg-blue-600 transition-colors">
-                      {u.name.charAt(0)}
-                    </div>
-                    <div className="truncate">
-                      <p className="text-xs font-bold text-white group-hover:text-blue-300 transition-colors truncate">
-                        {u.name}
-                      </p>
-                      <p className="text-[10px] text-slate-400 truncate">{u.email}</p>
-                    </div>
-                  </div>
-                  <span className={`text-[10px] px-2 py-0.5 rounded-md border font-semibold shrink-0 ${roleBadge.bg}`}>
-                    {roleBadge.label.split(' ')[0]}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
       </div>
 
       {/* Footer copyright */}

@@ -6,7 +6,15 @@
     <title>My Google AI Studio App</title>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <div style="min-height: 100vh; background-color: #0f172a; display: flex; flex-direction: column; align-items: center; justify-content: center; color: #ffffff; font-family: system-ui, -apple-system, sans-serif;">
+        <div style="width: 48px; height: 48px; border: 4px solid #1e293b; border-top-color: #3b82f6; border-radius: 50%; animation: spin 1s linear infinite;"></div>
+        <h2 style="margin-top: 20px; font-size: 18px; font-weight: 600; letter-spacing: 0.05em; color: #94a3b8;">MAMUTHUB Yükleniyor...</h2>
+        <style>
+          @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        </style>
+      </div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
