@@ -14,7 +14,7 @@ export interface PdfRenderResult {
 export async function convertPdfToImages(
   pdfInput: File | ArrayBuffer | string,
   maxPages: number = 50,
-  scale: number = 3.0
+  scale: number = 2.0
 ): Promise<PdfRenderResult> {
   try {
     let loadingTask;
@@ -67,7 +67,7 @@ export async function convertPdfToImages(
 
         await page.render(renderContext).promise;
         // Use high-quality JPEG (0.98) or PNG for crystal clear text & graphics
-        const imageUrl = canvas.toDataURL('image/jpeg', 0.98);
+        const imageUrl = canvas.toDataURL('image/jpeg', 0.88);
         images.push(imageUrl);
       }
     }

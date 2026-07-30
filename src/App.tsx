@@ -176,38 +176,44 @@ export default function App() {
         });
 
         // 2. Merge Firestore documents (ensuring local edits and local PDF/images override Firestore sanitized data)
-        for (const fp of validFirestore) {
-          const lp = map.get(fp.id);
+        await Promise.all(
+          validFirestore.map(async (fp) => {
+            const lp = map.get(fp.id);
 
-          // If pdfUrl or extractedImages are missing in both Firestore doc and local storage, attempt loading from presentation_assets
-          if ((!fp.pdfUrl || !fp.extractedImages || fp.extractedImages.length === 0) &&
-              (!lp || !lp.pdfUrl || !lp.extractedImages || lp.extractedImages.length === 0)) {
-            try {
-              const assets = await loadPresentationAssets(fp.id);
-              if (assets.pdfUrl) fp.pdfUrl = fp.pdfUrl || assets.pdfUrl;
-              if (assets.extractedImages) fp.extractedImages = (fp.extractedImages && fp.extractedImages.length > 0) ? fp.extractedImages : assets.extractedImages;
-            } catch {
-              // ignore
+            // If pdfUrl or extractedImages are missing in both Firestore doc and local storage, attempt loading from presentation_assets
+            if (
+              (!fp.pdfUrl || !fp.extractedImages || fp.extractedImages.length === 0) &&
+              (!lp || !lp.pdfUrl || !lp.extractedImages || lp.extractedImages.length === 0)
+            ) {
+              try {
+                const assets = await loadPresentationAssets(fp.id);
+                if (assets.pdfUrl) fp.pdfUrl = fp.pdfUrl || assets.pdfUrl;
+                if (assets.extractedImages && assets.extractedImages.length > 0) {
+                  fp.extractedImages = assets.extractedImages;
+                }
+              } catch {
+                // ignore
+              }
             }
-          }
 
-          if (lp) {
-            const merged = {
-              ...fp,
-              ...lp, // local user edits take priority
-              pdfUrl: lp.pdfUrl || fp.pdfUrl,
-              extractedImages:
-                lp.extractedImages && lp.extractedImages.length > 0
-                  ? lp.extractedImages
-                  : fp.extractedImages,
-            };
-            map.set(fp.id, merged);
-            await saveLocalPresentation(merged);
-          } else {
-            map.set(fp.id, fp);
-            await saveLocalPresentation(fp);
-          }
-        }
+            if (lp) {
+              const merged = {
+                ...fp,
+                ...lp, // local user edits take priority
+                pdfUrl: lp.pdfUrl || fp.pdfUrl,
+                extractedImages:
+                  lp.extractedImages && lp.extractedImages.length > 0
+                    ? lp.extractedImages
+                    : fp.extractedImages,
+              };
+              map.set(fp.id, merged);
+              await saveLocalPresentation(merged);
+            } else {
+              map.set(fp.id, fp);
+              await saveLocalPresentation(fp);
+            }
+          })
+        );
 
         // 3. For any user-created local presentation not yet in Firestore, upload it
         for (const lp of validLocal) {
