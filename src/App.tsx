@@ -32,6 +32,18 @@ import { Presentation, Category, Client, ViewMode, User, ViewAnalyticsLog, Clien
 import { generatePresentationPDF } from './utils/pdfExport';
 import { FileText, Plus, LayoutGrid, List, Folders, Briefcase } from 'lucide-react';
 import { subscribeToCollection, upsertItem, removeItem, replaceCollection } from './lib/firestoreService';
+import { 
+  saveLocalPresentation, 
+  getLocalPresentations, 
+  deleteLocalPresentation, 
+  sanitizePresentationForFirestore 
+} from './lib/storageService';
+
+interface TaxonomyDoc {
+  id: string;
+  fields: string[];
+  targetAudiences: string[];
+}
 
 export default function App() {
   // Users & Auth State
@@ -86,15 +98,94 @@ export default function App() {
   const [feedbacks, setFeedbacks] = useState<ClientFeedback[]>(initialFeedbacks);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>(initialAuditLogs);
 
+  const [allFields, setAllFields] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem('mamuthub_fields');
+      return saved ? JSON.parse(saved) : DEFAULT_FIELDS;
+    } catch {
+      return DEFAULT_FIELDS;
+    }
+  });
+
+  const [allTargetAudiences, setAllTargetAudiences] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem('mamuthub_target_audiences');
+      return saved ? JSON.parse(saved) : DEFAULT_TARGET_AUDIENCES;
+    } catch {
+      return DEFAULT_TARGET_AUDIENCES;
+    }
+  });
+
+  // Load IndexedDB presentations on startup to preserve large PDF data URLs and images
+  useEffect(() => {
+    getLocalPresentations<Presentation>().then((localPres) => {
+      if (localPres && localPres.length > 0) {
+        setPresentations((prev) => {
+          const map = new Map<string, Presentation>();
+          prev.forEach((p) => map.set(p.id, p));
+          localPres.forEach((lp) => {
+            const existing = map.get(lp.id);
+            if (existing) {
+              map.set(lp.id, {
+                ...existing,
+                ...lp,
+                extractedImages: lp.extractedImages || existing.extractedImages,
+                pdfUrl: lp.pdfUrl || existing.pdfUrl,
+              });
+            } else {
+              map.set(lp.id, lp);
+            }
+          });
+          return Array.from(map.values());
+        });
+      }
+    });
+  }, []);
+
   // Firestore Subscriptions
   useEffect(() => {
-    const unsubPres = subscribeToCollection<Presentation>('presentations', initialPresentations, setPresentations);
+    const unsubPres = subscribeToCollection<Presentation>('presentations', initialPresentations, (firestorePres) => {
+      // Merge firestore with local IndexedDB presentations
+      getLocalPresentations<Presentation>().then((localPres) => {
+        const localMap = new Map(localPres.map((lp) => [lp.id, lp]));
+        const merged = firestorePres.map((fp) => {
+          const lp = localMap.get(fp.id);
+          if (lp) {
+            return {
+              ...fp,
+              extractedImages: lp.extractedImages || fp.extractedImages,
+              pdfUrl: lp.pdfUrl || fp.pdfUrl,
+            };
+          }
+          return fp;
+        });
+        setPresentations(merged);
+      });
+    });
+
     const unsubCats = subscribeToCollection<Category>('categories', initialCategories, setCategories);
     const unsubCli = subscribeToCollection<Client>('clients', initialClients, setClients);
     const unsubUsers = subscribeToCollection<User>('users', initialUsers, setUsers);
     const unsubAnalytics = subscribeToCollection<ViewAnalyticsLog>('analytics', initialAnalyticsLogs, setAnalyticsLogs);
     const unsubFeedbacks = subscribeToCollection<ClientFeedback>('feedbacks', initialFeedbacks, setFeedbacks);
     const unsubAudit = subscribeToCollection<AuditLog>('auditLogs', initialAuditLogs, setAuditLogs);
+
+    const unsubTaxonomy = subscribeToCollection<TaxonomyDoc>(
+      'taxonomy',
+      [{ id: 'main', fields: DEFAULT_FIELDS, targetAudiences: DEFAULT_TARGET_AUDIENCES }],
+      (data) => {
+        if (data && data.length > 0 && data[0].fields) {
+          setAllFields(data[0].fields);
+          setAllTargetAudiences(data[0].targetAudiences);
+          try {
+            localStorage.setItem('mamuthub_fields', JSON.stringify(data[0].fields));
+            localStorage.setItem('mamuthub_target_audiences', JSON.stringify(data[0].targetAudiences));
+          } catch {
+            // ignore
+          }
+        }
+      }
+    );
 
     return () => {
       unsubPres();
@@ -104,6 +195,7 @@ export default function App() {
       unsubAnalytics();
       unsubFeedbacks();
       unsubAudit();
+      unsubTaxonomy();
     };
   }, []);
 
@@ -148,9 +240,6 @@ export default function App() {
   const unreadFeedbacksCount = useMemo(() => {
     return feedbacks.filter((f) => f.status === 'Yeni').length;
   }, [feedbacks]);
-
-  const [allFields, setAllFields] = useState<string[]>(DEFAULT_FIELDS);
-  const [allTargetAudiences, setAllTargetAudiences] = useState<string[]>(DEFAULT_TARGET_AUDIENCES);
 
   const [currentView, setCurrentView] = useState<ViewMode>('panel');
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
@@ -264,13 +353,27 @@ export default function App() {
     setSelectedCategory(null);
   };
 
+  // Helper to persist taxonomy changes (Fields & Target Audiences)
+  const persistTaxonomy = (fields: string[], audiences: string[]) => {
+    setAllFields(fields);
+    setAllTargetAudiences(audiences);
+    try {
+      localStorage.setItem('mamuthub_fields', JSON.stringify(fields));
+      localStorage.setItem('mamuthub_target_audiences', JSON.stringify(audiences));
+    } catch {
+      // ignore
+    }
+    upsertItem('taxonomy', { id: 'main', fields, targetAudiences: audiences });
+  };
+
   // Handlers
   const handleToggleFavorite = (id: string) => {
     setPresentations((prev) => {
       const updated = prev.map((p) => {
         if (p.id === id) {
           const item = { ...p, isFavorite: !p.isFavorite };
-          upsertItem('presentations', item);
+          saveLocalPresentation(item);
+          upsertItem('presentations', sanitizePresentationForFirestore(item));
           return item;
         }
         return p;
@@ -282,6 +385,7 @@ export default function App() {
   const handleDeletePresentation = (id: string) => {
     if (window.confirm('Bu sunumu silmek istediğinizden emin misiniz?')) {
       setPresentations((prev) => prev.filter((p) => p.id !== id));
+      deleteLocalPresentation(id);
       removeItem('presentations', id);
     }
   };
@@ -293,12 +397,14 @@ export default function App() {
   const handleAddUploadedPresentation = (newPres: Presentation) => {
     setPresentations([newPres, ...presentations]);
     setActiveStudioPresentation(newPres);
-    upsertItem('presentations', newPres);
+    saveLocalPresentation(newPres);
+    upsertItem('presentations', sanitizePresentationForFirestore(newPres));
   };
 
   const handleSavePresentation = (updated: Presentation) => {
     setPresentations((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
-    upsertItem('presentations', updated);
+    saveLocalPresentation(updated);
+    upsertItem('presentations', sanitizePresentationForFirestore(updated));
   };
 
   // Category Handlers
@@ -320,16 +426,19 @@ export default function App() {
   // Taxonomy Handlers for Fields & Target Audiences
   const handleAddField = (field: string) => {
     const trimmed = field.trim();
-    if (!trimmed) return;
-    setAllFields((prev) => (prev.includes(trimmed) ? prev : [...prev, trimmed]));
+    if (!trimmed || allFields.includes(trimmed)) return;
+    const updated = [...allFields, trimmed];
+    persistTaxonomy(updated, allTargetAudiences);
   };
 
   const handleEditField = (oldName: string, newName: string) => {
     const trimmed = newName.trim();
     if (!trimmed || trimmed === oldName) return;
 
-    setAllFields((prev) => prev.map((f) => (f === oldName ? trimmed : f)));
+    const updatedFields = allFields.map((f) => (f === oldName ? trimmed : f));
     setSelectedFields((prev) => prev.map((f) => (f === oldName ? trimmed : f)));
+    persistTaxonomy(updatedFields, allTargetAudiences);
+
     setPresentations((prev) => {
       const updated = prev.map((p) => {
         if (!p.fields || !p.fields.includes(oldName)) return p;
@@ -337,7 +446,8 @@ export default function App() {
           ...p,
           fields: p.fields.map((f) => (f === oldName ? trimmed : f)),
         };
-        upsertItem('presentations', newPres);
+        saveLocalPresentation(newPres);
+        upsertItem('presentations', sanitizePresentationForFirestore(newPres));
         return newPres;
       });
       return updated;
@@ -345,8 +455,10 @@ export default function App() {
   };
 
   const handleDeleteField = (field: string) => {
-    setAllFields((prev) => prev.filter((f) => f !== field));
+    const updatedFields = allFields.filter((f) => f !== field);
     setSelectedFields((prev) => prev.filter((f) => f !== field));
+    persistTaxonomy(updatedFields, allTargetAudiences);
+
     setPresentations((prev) => {
       const updated = prev.map((p) => {
         if (!p.fields || !p.fields.includes(field)) return p;
@@ -354,7 +466,8 @@ export default function App() {
           ...p,
           fields: p.fields.filter((f) => f !== field),
         };
-        upsertItem('presentations', newPres);
+        saveLocalPresentation(newPres);
+        upsertItem('presentations', sanitizePresentationForFirestore(newPres));
         return newPres;
       });
       return updated;
@@ -363,16 +476,19 @@ export default function App() {
 
   const handleAddTargetAudience = (audience: string) => {
     const trimmed = audience.trim();
-    if (!trimmed) return;
-    setAllTargetAudiences((prev) => (prev.includes(trimmed) ? prev : [...prev, trimmed]));
+    if (!trimmed || allTargetAudiences.includes(trimmed)) return;
+    const updated = [...allTargetAudiences, trimmed];
+    persistTaxonomy(allFields, updated);
   };
 
   const handleEditTargetAudience = (oldName: string, newName: string) => {
     const trimmed = newName.trim();
     if (!trimmed || trimmed === oldName) return;
 
-    setAllTargetAudiences((prev) => prev.map((a) => (a === oldName ? trimmed : a)));
+    const updatedAudiences = allTargetAudiences.map((a) => (a === oldName ? trimmed : a));
     setSelectedTargetAudiences((prev) => prev.map((a) => (a === oldName ? trimmed : a)));
+    persistTaxonomy(allFields, updatedAudiences);
+
     setPresentations((prev) => {
       const updated = prev.map((p) => {
         if (!p.targetAudiences || !p.targetAudiences.includes(oldName)) return p;
@@ -380,7 +496,8 @@ export default function App() {
           ...p,
           targetAudiences: p.targetAudiences.map((a) => (a === oldName ? trimmed : a)),
         };
-        upsertItem('presentations', newPres);
+        saveLocalPresentation(newPres);
+        upsertItem('presentations', sanitizePresentationForFirestore(newPres));
         return newPres;
       });
       return updated;
@@ -388,8 +505,10 @@ export default function App() {
   };
 
   const handleDeleteTargetAudience = (audience: string) => {
-    setAllTargetAudiences((prev) => prev.filter((a) => a !== audience));
+    const updatedAudiences = allTargetAudiences.filter((a) => a !== audience);
     setSelectedTargetAudiences((prev) => prev.filter((a) => a !== audience));
+    persistTaxonomy(allFields, updatedAudiences);
+
     setPresentations((prev) => {
       const updated = prev.map((p) => {
         if (!p.targetAudiences || !p.targetAudiences.includes(audience)) return p;
@@ -397,7 +516,8 @@ export default function App() {
           ...p,
           targetAudiences: p.targetAudiences.filter((a) => a !== audience),
         };
-        upsertItem('presentations', newPres);
+        saveLocalPresentation(newPres);
+        upsertItem('presentations', sanitizePresentationForFirestore(newPres));
         return newPres;
       });
       return updated;
