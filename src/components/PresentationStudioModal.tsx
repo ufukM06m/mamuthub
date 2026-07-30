@@ -52,14 +52,18 @@ export const PresentationStudioModal: React.FC<PresentationStudioModalProps> = (
   const [newCustomField, setNewCustomField] = useState<string>('');
   const [newCustomAudience, setNewCustomAudience] = useState<string>('');
 
-  // Combined available lists
+  useEffect(() => {
+    setPresentation(initialPresentation);
+  }, [initialPresentation]);
+
+  // Combined available lists from taxonomy
   const availableFieldsList = useMemo(() => {
-    return Array.from(new Set([...allFields, ...(presentation.fields || [])])).sort();
-  }, [allFields, presentation.fields]);
+    return Array.from(new Set(allFields)).sort();
+  }, [allFields]);
 
   const availableAudiencesList = useMemo(() => {
-    return Array.from(new Set([...allTargetAudiences, ...(presentation.targetAudiences || [])])).sort();
-  }, [allTargetAudiences, presentation.targetAudiences]);
+    return Array.from(new Set(allTargetAudiences)).sort();
+  }, [allTargetAudiences]);
 
   // Compute active PDF URL (or generate standard fallback PDF if needed)
   const activePdfUrl = useMemo(() => {
@@ -248,6 +252,11 @@ export const PresentationStudioModal: React.FC<PresentationStudioModalProps> = (
                     {c.name}
                   </option>
                 ))}
+                {presentation.category && !categories.some((c) => c.name === presentation.category) && (
+                  <option value={presentation.category}>
+                    {presentation.category}
+                  </option>
+                )}
               </select>
             </div>
 

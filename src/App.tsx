@@ -187,8 +187,25 @@ export default function App() {
           }
         });
 
-        const merged = Array.from(map.values());
+        const merged = Array.from(map.values()).sort((a, b) => {
+          const timeA = a.id.startsWith('pres-')
+            ? parseInt(a.id.replace('pres-', '')) || 0
+            : Date.parse(a.updatedAt || '2020-01-01');
+          const timeB = b.id.startsWith('pres-')
+            ? parseInt(b.id.replace('pres-', '')) || 0
+            : Date.parse(b.updatedAt || '2020-01-01');
+          return timeB - timeA;
+        });
+
         setPresentations(merged);
+
+        const activeId = sessionStorage.getItem('mamuthub_active_pres_id');
+        if (activeId) {
+          const found = merged.find((p) => p.id === activeId);
+          if (found) {
+            setActiveStudioPresentationState(found);
+          }
+        }
       });
     });
 
@@ -278,7 +295,17 @@ export default function App() {
   const [displayMode, setDisplayMode] = useState<'grid' | 'list'>('grid');
 
   // Modals state
-  const [activeStudioPresentation, setActiveStudioPresentation] = useState<Presentation | null>(null);
+  // Active Studio presentation state with session persistence
+  const [activeStudioPresentation, setActiveStudioPresentationState] = useState<Presentation | null>(null);
+
+  const setActiveStudioPresentation = (p: Presentation | null) => {
+    setActiveStudioPresentationState(p);
+    if (p) {
+      sessionStorage.setItem('mamuthub_active_pres_id', p.id);
+    } else {
+      sessionStorage.removeItem('mamuthub_active_pres_id');
+    }
+  };
   const [isManageCategoriesOpen, setIsManageCategoriesOpen] = useState<boolean>(false);
   const [isManageTaxonomyOpen, setIsManageTaxonomyOpen] = useState<boolean>(false);
   const [isBackupModalOpen, setIsBackupModalOpen] = useState<boolean>(false);
@@ -572,7 +599,8 @@ export default function App() {
       const updated = prev.map((p) => {
         if (p.category === oldName) {
           const item = { ...p, category: newName };
-          upsertItem('presentations', item);
+          saveLocalPresentation(item);
+          upsertItem('presentations', sanitizePresentationForFirestore(item));
           return item;
         }
         return p;
@@ -595,7 +623,8 @@ export default function App() {
       const updated = prev.map((p) => {
         if (p.category === catName) {
           const item = { ...p, category: 'GENEL SUNUMLAR' };
-          upsertItem('presentations', item);
+          saveLocalPresentation(item);
+          upsertItem('presentations', sanitizePresentationForFirestore(item));
           return item;
         }
         return p;
