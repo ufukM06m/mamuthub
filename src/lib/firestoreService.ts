@@ -18,23 +18,8 @@ export function subscribeToCollection<T extends { id: string }>(
 
   const unsubscribe = onSnapshot(
     colRef,
-    async (snapshot) => {
-      if (snapshot.empty && initialDataIfEmpty && initialDataIfEmpty.length > 0) {
-        const seedKey = `mamuthub_seeded_${collectionName}`;
-        if (!localStorage.getItem(seedKey)) {
-          localStorage.setItem(seedKey, 'true');
-          try {
-            const batch = writeBatch(db);
-            initialDataIfEmpty.forEach((item) => {
-              const docRef = doc(db, collectionName, item.id);
-              batch.set(docRef, item);
-            });
-            await batch.commit();
-            return;
-          } catch (err) {
-            console.error(`Error seeding initial data for ${collectionName}:`, err);
-          }
-        }
+    (snapshot) => {
+      if (snapshot.empty) {
         onData([]);
       } else {
         const items = snapshot.docs.map((docSnap) => ({
@@ -46,7 +31,7 @@ export function subscribeToCollection<T extends { id: string }>(
     },
     (error) => {
       console.warn(`Firestore subscription warning [${collectionName}]:`, error);
-      onData(initialDataIfEmpty);
+      onData([]);
     }
   );
 

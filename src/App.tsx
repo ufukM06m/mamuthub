@@ -92,7 +92,7 @@ export default function App() {
     }
   }, [currentUser]);
 
-  const [presentations, setPresentations] = useState<Presentation[]>(initialPresentations);
+  const [presentations, setPresentations] = useState<Presentation[]>([]);
   const [categories, setCategories] = useState<Category[]>(initialCategories);
   const [clients, setClients] = useState<Client[]>(initialClients);
 
@@ -151,7 +151,7 @@ export default function App() {
 
   // Firestore Subscriptions
   useEffect(() => {
-    const unsubPres = subscribeToCollection<Presentation>('presentations', initialPresentations, (firestorePres) => {
+    const unsubPres = subscribeToCollection<Presentation>('presentations', [], (firestorePres) => {
       getLocalPresentations<Presentation>().then((localPres) => {
         const deletedIds = getDeletedPresIds();
         const map = new Map<string, Presentation>();
@@ -159,14 +159,18 @@ export default function App() {
         const validFirestore = firestorePres.filter((fp) => !deletedIds.includes(fp.id));
         const validLocal = localPres.filter((lp) => !deletedIds.includes(lp.id));
 
-        const localMap = new Map(validLocal.map((lp) => [lp.id, lp]));
+        // 1. First add local user presentations from IndexedDB (they hold complete binary PDF data and local edits)
+        validLocal.forEach((lp) => {
+          map.set(lp.id, lp);
+        });
 
-        // 1. Primary: Firestore documents (enriched with IndexedDB pdfUrl / extractedImages)
+        // 2. Merge Firestore documents (ensuring local edits and local PDF/images override Firestore sanitized data)
         validFirestore.forEach((fp) => {
-          const lp = localMap.get(fp.id);
+          const lp = map.get(fp.id);
           if (lp) {
             map.set(fp.id, {
               ...fp,
+              ...lp, // local user edits take priority
               pdfUrl: lp.pdfUrl || fp.pdfUrl,
               extractedImages:
                 lp.extractedImages && lp.extractedImages.length > 0
@@ -179,22 +183,31 @@ export default function App() {
           }
         });
 
-        // 2. Secondary: Local uploads that haven't reached Firestore yet
+        // 3. For any user-created local presentation not yet in Firestore, upload it (skipping mock pres-1..4)
         validLocal.forEach((lp) => {
-          if (!map.has(lp.id)) {
-            map.set(lp.id, lp);
+          const isMock = ['pres-1', 'pres-2', 'pres-3', 'pres-4'].includes(lp.id);
+          if (!isMock && !validFirestore.some((fp) => fp.id === lp.id)) {
             upsertItem('presentations', sanitizePresentationForFirestore(lp));
           }
         });
 
         const merged = Array.from(map.values()).sort((a, b) => {
-          const timeA = a.id.startsWith('pres-')
-            ? parseInt(a.id.replace('pres-', '')) || 0
-            : Date.parse(a.updatedAt || '2020-01-01');
-          const timeB = b.id.startsWith('pres-')
-            ? parseInt(b.id.replace('pres-', '')) || 0
-            : Date.parse(b.updatedAt || '2020-01-01');
-          return timeB - timeA;
+          const getTimestamp = (p: Presentation) => {
+            if (p.updatedAt) {
+              const parsed = Date.parse(p.updatedAt);
+              if (!isNaN(parsed) && parsed > 0) return parsed;
+            }
+            if (p.createdAt) {
+              const parsed = Date.parse(p.createdAt);
+              if (!isNaN(parsed) && parsed > 0) return parsed;
+            }
+            if (p.id.startsWith('pres-')) {
+              const num = parseInt(p.id.replace('pres-', ''), 10);
+              if (!isNaN(num) && num > 100000) return num;
+            }
+            return 0;
+          };
+          return getTimestamp(b) - getTimestamp(a);
         });
 
         setPresentations(merged);
@@ -209,23 +222,35 @@ export default function App() {
       });
     });
 
-    const unsubCats = subscribeToCollection<Category>('categories', initialCategories, setCategories);
-    const unsubCli = subscribeToCollection<Client>('clients', initialClients, setClients);
-    const unsubUsers = subscribeToCollection<User>('users', initialUsers, setUsers);
-    const unsubAnalytics = subscribeToCollection<ViewAnalyticsLog>('analytics', initialAnalyticsLogs, setAnalyticsLogs);
-    const unsubFeedbacks = subscribeToCollection<ClientFeedback>('feedbacks', initialFeedbacks, setFeedbacks);
-    const unsubAudit = subscribeToCollection<AuditLog>('auditLogs', initialAuditLogs, setAuditLogs);
+    const unsubCats = subscribeToCollection<Category>('categories', [], (cats) => {
+      if (cats && cats.length > 0) {
+        setCategories(cats);
+      }
+    });
+    const unsubCli = subscribeToCollection<Client>('clients', [], (clis) => {
+      if (clis && clis.length > 0) {
+        setClients(clis);
+      }
+    });
+    const unsubUsers = subscribeToCollection<User>('users', [], (usr) => {
+      if (usr && usr.length > 0) {
+        setUsers(usr);
+      }
+    });
+    const unsubAnalytics = subscribeToCollection<ViewAnalyticsLog>('analytics', [], setAnalyticsLogs);
+    const unsubFeedbacks = subscribeToCollection<ClientFeedback>('feedbacks', [], setFeedbacks);
+    const unsubAudit = subscribeToCollection<AuditLog>('auditLogs', [], setAuditLogs);
 
     const unsubTaxonomy = subscribeToCollection<TaxonomyDoc>(
       'taxonomy',
-      [{ id: 'main', fields: DEFAULT_FIELDS, targetAudiences: DEFAULT_TARGET_AUDIENCES }],
+      [],
       (data) => {
-        if (data && data.length > 0 && data[0].fields) {
+        if (data && data.length > 0 && data[0].fields && data[0].fields.length > 0) {
           setAllFields(data[0].fields);
-          setAllTargetAudiences(data[0].targetAudiences);
+          setAllTargetAudiences(data[0].targetAudiences || []);
           try {
             localStorage.setItem('mamuthub_fields', JSON.stringify(data[0].fields));
-            localStorage.setItem('mamuthub_target_audiences', JSON.stringify(data[0].targetAudiences));
+            localStorage.setItem('mamuthub_target_audiences', JSON.stringify(data[0].targetAudiences || []));
           } catch {
             // ignore
           }
@@ -438,12 +463,12 @@ export default function App() {
     });
   };
 
-  const handleDeletePresentation = (id: string) => {
+  const handleDeletePresentation = async (id: string) => {
     if (window.confirm('Bu sunumu silmek istediğinizden emin misiniz?')) {
       addDeletedPresId(id);
       setPresentations((prev) => prev.filter((p) => p.id !== id));
-      deleteLocalPresentation(id);
-      removeItem('presentations', id);
+      await deleteLocalPresentation(id);
+      await removeItem('presentations', id);
     }
   };
 
@@ -452,16 +477,28 @@ export default function App() {
   };
 
   const handleAddUploadedPresentation = (newPres: Presentation) => {
-    setPresentations([newPres, ...presentations]);
-    setActiveStudioPresentation(newPres);
-    saveLocalPresentation(newPres);
-    upsertItem('presentations', sanitizePresentationForFirestore(newPres));
+    const timeStamped: Presentation = {
+      ...newPres,
+      createdAt: newPres.createdAt || new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    setPresentations((prev) => [timeStamped, ...prev.filter((p) => p.id !== timeStamped.id)]);
+    setActiveStudioPresentation(timeStamped);
+    saveLocalPresentation(timeStamped);
+    upsertItem('presentations', sanitizePresentationForFirestore(timeStamped));
   };
 
   const handleSavePresentation = (updated: Presentation) => {
-    setPresentations((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
-    saveLocalPresentation(updated);
-    upsertItem('presentations', sanitizePresentationForFirestore(updated));
+    const timeStamped: Presentation = {
+      ...updated,
+      updatedAt: new Date().toISOString(),
+    };
+    setPresentations((prev) => prev.map((p) => (p.id === timeStamped.id ? timeStamped : p)));
+    if (activeStudioPresentation?.id === timeStamped.id) {
+      setActiveStudioPresentationState(timeStamped);
+    }
+    saveLocalPresentation(timeStamped);
+    upsertItem('presentations', sanitizePresentationForFirestore(timeStamped));
   };
 
   // Category Handlers
@@ -722,6 +759,18 @@ export default function App() {
     a.download = `MAMUTHUB_Yedek_${new Date().toISOString().split('T')[0]}.json`;
     a.click();
     URL.revokeObjectURL(url);
+  };
+
+  const handlePurgeTestData = async () => {
+    if (window.confirm('Veritabanındaki ve önbellekteki tüm varsayılan örnek/test sunumları silinsin mi? Yalnızca sizin eklediğiniz gerçek sunumlar kalacaktır.')) {
+      const mockIds = ['pres-1', 'pres-2', 'pres-3', 'pres-4'];
+      mockIds.forEach((id) => addDeletedPresId(id));
+      setPresentations((prev) => prev.filter((p) => !mockIds.includes(p.id)));
+      for (const id of mockIds) {
+        await deleteLocalPresentation(id);
+        await removeItem('presentations', id);
+      }
+    }
   };
 
   const handleRestoreData = (restored: {
@@ -1069,6 +1118,7 @@ export default function App() {
         <BackupModal
           onClose={() => setIsBackupModalOpen(false)}
           onRestoreData={handleRestoreData}
+          onPurgeTestData={handlePurgeTestData}
         />
       )}
 

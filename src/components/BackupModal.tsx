@@ -9,9 +9,10 @@ interface BackupModalProps {
     categories?: Category[];
     clients?: Client[];
   }) => void;
+  onPurgeTestData?: () => void;
 }
 
-export const BackupModal: React.FC<BackupModalProps> = ({ onClose, onRestoreData }) => {
+export const BackupModal: React.FC<BackupModalProps> = ({ onClose, onRestoreData, onPurgeTestData }) => {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<boolean>(false);
 
@@ -81,6 +82,22 @@ export const BackupModal: React.FC<BackupModalProps> = ({ onClose, onRestoreData
           <div className="p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs flex items-center gap-2">
             <Check className="w-4 h-4 shrink-0" />
             <span>Yedekleme başarıyla geri yüklendi!</span>
+          </div>
+        )}
+
+        {onPurgeTestData && (
+          <div className="pt-2 border-t border-slate-800 flex items-center justify-between">
+            <span className="text-xs text-slate-400">Veritabanındaki tüm test/örnek sunumları temizle</span>
+            <button
+              type="button"
+              onClick={() => {
+                onPurgeTestData();
+                onClose();
+              }}
+              className="px-3 py-1.5 rounded-lg bg-red-500/20 hover:bg-red-500/30 text-red-400 text-xs font-semibold transition-all border border-red-500/30"
+            >
+              Test Verilerini Sil
+            </button>
           </div>
         )}
 
