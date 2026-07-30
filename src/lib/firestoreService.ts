@@ -83,20 +83,23 @@ export async function replaceCollection<T extends { id: string }>(
   }
 }
 
+const assetMemoryCache = new Map<string, { pdfUrl?: string; extractedImages?: string[] }>();
+
 // Save large presentation assets (base64 PDF data & slide images) to separate Firestore sub-documents
 export async function savePresentationAssets(presId: string, pdfUrl?: string, extractedImages?: string[]): Promise<void> {
+  assetMemoryCache.set(presId, { pdfUrl, extractedImages });
   try {
-    const promises: Promise<void>[] = [];
+    const tasks: Array<() => Promise<void>> = [];
 
     if (pdfUrl && pdfUrl.startsWith('data:')) {
       const chunkSize = 250 * 1024;
       if (pdfUrl.length <= chunkSize) {
-        promises.push(setDoc(doc(db, 'presentation_assets', `${presId}_pdf`), { data: pdfUrl, presId }));
+        tasks.push(() => setDoc(doc(db, 'presentation_assets', `${presId}_pdf`), { data: pdfUrl, presId }));
       } else {
         const totalChunks = Math.ceil(pdfUrl.length / chunkSize);
         for (let i = 0; i < totalChunks; i++) {
           const chunk = pdfUrl.slice(i * chunkSize, (i + 1) * chunkSize);
-          promises.push(setDoc(doc(db, 'presentation_assets', `${presId}_pdf_${i}`), { chunk, presId, index: i, total: totalChunks }));
+          tasks.push(() => setDoc(doc(db, 'presentation_assets', `${presId}_pdf_${i}`), { chunk, presId, index: i, total: totalChunks }));
         }
       }
     }
@@ -104,13 +107,16 @@ export async function savePresentationAssets(presId: string, pdfUrl?: string, ex
       for (let i = 0; i < extractedImages.length; i++) {
         const img = extractedImages[i];
         if (img && typeof img === 'string' && img.startsWith('data:')) {
-          promises.push(setDoc(doc(db, 'presentation_assets', `${presId}_slide_${i}`), { data: img, presId, slideIndex: i }));
+          tasks.push(() => setDoc(doc(db, 'presentation_assets', `${presId}_slide_${i}`), { data: img, presId, slideIndex: i }));
         }
       }
     }
 
-    if (promises.length > 0) {
-      await Promise.all(promises);
+    // Execute in batches of 6 concurrent requests to prevent Firestore connection drops
+    const BATCH_SIZE = 6;
+    for (let i = 0; i < tasks.length; i += BATCH_SIZE) {
+      const batch = tasks.slice(i, i + BATCH_SIZE);
+      await Promise.all(batch.map((fn) => fn().catch((err) => console.warn('Asset save chunk warning:', err))));
     }
   } catch (err) {
     console.warn('Failed to save presentation assets to Firestore:', err);
@@ -119,6 +125,9 @@ export async function savePresentationAssets(presId: string, pdfUrl?: string, ex
 
 // Load presentation assets from Firestore in ONE single query call
 export async function loadPresentationAssets(presId: string): Promise<{ pdfUrl?: string; extractedImages?: string[] }> {
+  if (assetMemoryCache.has(presId)) {
+    return assetMemoryCache.get(presId)!;
+  }
   try {
     let pdfUrl: string | undefined;
     const chunkMap = new Map<number, string>();
@@ -161,10 +170,16 @@ export async function loadPresentationAssets(presId: string): Promise<{ pdfUrl?:
       sortedImages = sortedSlideIndexes.map((idx) => slideMap.get(idx)!);
     }
 
-    return {
+    const result = {
       pdfUrl: pdfUrl || undefined,
       extractedImages: sortedImages,
     };
+
+    if (result.pdfUrl || (result.extractedImages && result.extractedImages.length > 0)) {
+      assetMemoryCache.set(presId, result);
+    }
+
+    return result;
   } catch (err) {
     console.warn('Failed to load presentation assets from Firestore:', err);
     return {};

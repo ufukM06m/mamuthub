@@ -10,7 +10,7 @@ interface UploadPdfModalProps {
   allFields?: string[];
   allTargetAudiences?: string[];
   onClose: () => void;
-  onAddPresentation: (newPres: Presentation) => void;
+  onAddPresentation: (newPres: Presentation) => Promise<void> | void;
   onAddField?: (field: string) => void;
   onAddTargetAudience?: (audience: string) => void;
 }
@@ -29,6 +29,7 @@ export const UploadPdfModal: React.FC<UploadPdfModalProps> = ({
   const [extractedImages, setExtractedImages] = useState<string[]>([]);
   const [fileSizeStr, setFileSizeStr] = useState<string>('');
   const [isProcessingPdf, setIsProcessingPdf] = useState<boolean>(false);
+  const [isSaving, setIsSaving] = useState<boolean>(false);
 
   const [code, setCode] = useState<string>('');
   const [title, setTitle] = useState<string>('');
@@ -103,7 +104,7 @@ export const UploadPdfModal: React.FC<UploadPdfModalProps> = ({
     }
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
     if (!code.trim() || !title.trim()) {
@@ -111,55 +112,65 @@ export const UploadPdfModal: React.FC<UploadPdfModalProps> = ({
       return;
     }
 
-    let finalPdfUrl = pdfDataUrl || undefined;
-    if (!finalPdfUrl) {
-      finalPdfUrl = createPresentationPdfDataUrl({
-        id: 'tmp',
-        code,
-        title,
-        description: description || 'MAMUTHUB Yüklenen PDF Sunumu',
+    setIsSaving(true);
+    setErrorMessage('');
+
+    try {
+      let finalPdfUrl = pdfDataUrl || undefined;
+      if (!finalPdfUrl) {
+        finalPdfUrl = createPresentationPdfDataUrl({
+          id: 'tmp',
+          code,
+          title,
+          description: description || 'MAMUTHUB Yüklenen PDF Sunumu',
+          category,
+          pageCount,
+          updatedAt: new Date().toISOString().split('T')[0],
+          createdAt: new Date().toISOString().split('T')[0],
+          thumbnailUrl,
+          isFavorite: false,
+          slides: [],
+          tags: tagsInput.split(',').map((t) => t.trim()),
+        });
+      }
+
+      const newPres: Presentation = {
+        id: `pres-${Date.now()}`,
+        code: code.trim(),
+        title: title.trim(),
+        description: description.trim() || 'MAMUTHUB Yönetim Paneline Yüklenmiş PDF Sunumu',
         category,
-        pageCount,
+        pageCount: Number(pageCount) || 1,
         updatedAt: new Date().toISOString().split('T')[0],
         createdAt: new Date().toISOString().split('T')[0],
-        thumbnailUrl,
+        thumbnailUrl: thumbnailUrl.trim(),
+        pdfUrl: finalPdfUrl,
+        pdfFileName: selectedFile ? selectedFile.name : `${code}.pdf`,
+        pdfFileSize: fileSizeStr || '1.8 MB',
         isFavorite: false,
-        slides: [],
-        tags: tagsInput.split(',').map((t) => t.trim()),
-      });
+        extractedImages: extractedImages.length > 0 ? extractedImages : undefined,
+        tags: tagsInput.split(',').map((t) => t.trim()).filter(Boolean),
+        fields: selectedFields,
+        targetAudiences: selectedTargetAudiences,
+        slides: [
+          {
+            id: 'slide-1',
+            title: title.trim(),
+            subtitle: code.trim(),
+            content: description.trim() || 'Yüklenen PDF Sunumu',
+            layout: 'title',
+          },
+        ],
+      };
+
+      await onAddPresentation(newPres);
+      onClose();
+    } catch (err) {
+      console.error('Sunum kaydedilirken hata:', err);
+      setErrorMessage('Veritabanına kaydedilirken hata oluştu: ' + (err instanceof Error ? err.message : String(err)));
+    } finally {
+      setIsSaving(false);
     }
-
-    const newPres: Presentation = {
-      id: `pres-${Date.now()}`,
-      code: code.trim(),
-      title: title.trim(),
-      description: description.trim() || 'MAMUTHUB Yönetim Paneline Yüklenmiş PDF Sunumu',
-      category,
-      pageCount: Number(pageCount) || 1,
-      updatedAt: new Date().toISOString().split('T')[0],
-      createdAt: new Date().toISOString().split('T')[0],
-      thumbnailUrl: thumbnailUrl.trim(),
-      pdfUrl: finalPdfUrl,
-      pdfFileName: selectedFile ? selectedFile.name : `${code}.pdf`,
-      pdfFileSize: fileSizeStr || '1.8 MB',
-      isFavorite: false,
-      extractedImages: extractedImages.length > 0 ? extractedImages : undefined,
-      tags: tagsInput.split(',').map((t) => t.trim()).filter(Boolean),
-      fields: selectedFields,
-      targetAudiences: selectedTargetAudiences,
-      slides: [
-        {
-          id: 'slide-1',
-          title: title.trim(),
-          subtitle: code.trim(),
-          content: description.trim() || 'Yüklenen PDF Sunumu',
-          layout: 'title',
-        },
-      ],
-    };
-
-    onAddPresentation(newPres);
-    onClose();
   };
 
   return (
@@ -505,10 +516,20 @@ export const UploadPdfModal: React.FC<UploadPdfModalProps> = ({
             </button>
             <button
               type="submit"
-              className="px-5 py-2.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold shadow-lg shadow-blue-600/30 transition-all flex items-center gap-2"
+              disabled={isSaving || isProcessingPdf}
+              className="px-5 py-2.5 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:bg-blue-800/60 disabled:cursor-not-allowed text-white text-xs font-semibold shadow-lg shadow-blue-600/30 transition-all flex items-center gap-2"
             >
-              <Upload className="w-4 h-4" />
-              <span>PDF Sunumu Kaydet & Ekle</span>
+              {isSaving ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin text-blue-200" />
+                  <span>Veritabanına Kaydediliyor...</span>
+                </>
+              ) : (
+                <>
+                  <Upload className="w-4 h-4" />
+                  <span>PDF Sunumu Kaydet & Ekle</span>
+                </>
+              )}
             </button>
           </div>
         </form>

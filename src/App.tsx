@@ -207,21 +207,13 @@ export default function App() {
                     : fp.extractedImages,
               };
               map.set(fp.id, merged);
-              await saveLocalPresentation(merged);
+              saveLocalPresentation(merged).catch(() => {});
             } else {
               map.set(fp.id, fp);
-              await saveLocalPresentation(fp);
+              saveLocalPresentation(fp).catch(() => {});
             }
           })
         );
-
-        // 3. For any user-created local presentation not yet in Firestore, upload it
-        for (const lp of validLocal) {
-          if (!validFirestore.some((fp) => fp.id === lp.id)) {
-            const sanitized = await sanitizePresentationForFirestore(lp);
-            await upsertItem('presentations', sanitized);
-          }
-        }
 
         const merged = Array.from(map.values()).sort((a, b) => {
           const getTimestamp = (p: Presentation) => {
