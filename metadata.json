@@ -1,0 +1,6 @@
+{
+  "name": "MAMUTHUB Kurumsal Yönetim Paneli",
+  "description": "Sunumlarınızı PDF yapmanızı sağlayan, kategorileri, sunumları ve müşterileri yönetebildiğiniz kurumsal sunum yönetim platformu.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

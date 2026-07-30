@@ -1,0 +1,124 @@
+{
+  "entities": {
+    "presentations": {
+      "title": "Presentations",
+      "description": "Sunumlar koleksiyonu",
+      "type": "object",
+      "properties": {
+        "code": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "category": { "type": "string" },
+        "pageCount": { "type": "number" },
+        "updatedAt": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "thumbnailUrl": { "type": "string" },
+        "pdfUrl": { "type": "string" },
+        "pdfFileName": { "type": "string" },
+        "pdfFileSize": { "type": "string" },
+        "isFavorite": { "type": "boolean" },
+        "clientId": { "type": "string" },
+        "clientName": { "type": "string" },
+        "slides": { "type": "array" },
+        "extractedImages": { "type": "array" },
+        "tags": { "type": "array" },
+        "fields": { "type": "array" },
+        "targetAudiences": { "type": "array" }
+      },
+      "required": ["code", "title", "category"]
+    },
+    "categories": {
+      "title": "Categories",
+      "description": "Kategoriler",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "slug": { "type": "string" },
+        "count": { "type": "number" },
+        "color": { "type": "string" }
+      },
+      "required": ["name", "slug"]
+    },
+    "clients": {
+      "title": "Clients",
+      "description": "Müşteriler",
+      "type": "object",
+      "properties": {
+        "companyName": { "type": "string" },
+        "contactPerson": { "type": "string" },
+        "email": { "type": "string" },
+        "phone": { "type": "string" },
+        "assignedPresentationsCount": { "type": "number" },
+        "status": { "type": "string" },
+        "notes": { "type": "string" },
+        "logoUrl": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["companyName"]
+    },
+    "users": {
+      "title": "Users",
+      "description": "Kullanıcılar",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "role": { "type": "string" },
+        "status": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["name", "email", "role"]
+    },
+    "analytics": {
+      "title": "Analytics",
+      "description": "İzlenme Analitik Logları",
+      "type": "object",
+      "properties": {
+        "presentationId": { "type": "string" },
+        "presentationTitle": { "type": "string" },
+        "clientId": { "type": "string" },
+        "clientName": { "type": "string" },
+        "viewedAt": { "type": "string" },
+        "durationSeconds": { "type": "number" },
+        "completedPages": { "type": "number" },
+        "totalPages": { "type": "number" },
+        "device": { "type": "string" },
+        "location": { "type": "string" }
+      },
+      "required": ["presentationId", "viewedAt"]
+    },
+    "feedbacks": {
+      "title": "Feedbacks",
+      "description": "Müşteri Geri Bildirimleri",
+      "type": "object",
+      "properties": {
+        "presentationId": { "type": "string" },
+        "presentationTitle": { "type": "string" },
+        "clientId": { "type": "string" },
+        "clientName": { "type": "string" },
+        "clientEmail": { "type": "string" },
+        "slideIndex": { "type": "number" },
+        "feedbackType": { "type": "string" },
+        "comment": { "type": "string" },
+        "rating": { "type": "number" },
+        "status": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["presentationTitle", "comment"]
+    },
+    "auditLogs": {
+      "title": "Audit Logs",
+      "description": "Denetim Logları",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "userName": { "type": "string" },
+        "userRole": { "type": "string" },
+        "action": { "type": "string" },
+        "details": { "type": "string" },
+        "timestamp": { "type": "string" }
+      },
+      "required": ["action", "timestamp"]
+    }
+  }
+}

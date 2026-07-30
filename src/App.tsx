@@ -1,0 +1,889 @@
+import React, { useState, useMemo, useEffect } from 'react';
+import { Sidebar } from './components/Sidebar';
+import { Header } from './components/Header';
+import { PresentationCard } from './components/PresentationCard';
+import { PresentationListView } from './components/PresentationListView';
+import { PresentationStudioModal } from './components/PresentationStudioModal';
+import { CustomerManagement } from './components/CustomerManagement';
+import { UserManagement } from './components/UserManagement';
+import { LoginScreen } from './components/LoginScreen';
+import { ManageCategoriesModal } from './components/ManageCategoriesModal';
+import { ManageTaxonomyModal } from './components/ManageTaxonomyModal';
+import { BackupModal } from './components/BackupModal';
+import { UploadPdfModal } from './components/UploadPdfModal';
+import { ClientPortalModal } from './components/ClientPortalModal';
+import { FilterBar } from './components/FilterBar';
+import { AnalyticsView } from './components/AnalyticsView';
+import { ClientFeedbackView } from './components/ClientFeedbackView';
+import { AuditLogView } from './components/AuditLogView';
+
+import { 
+  initialCategories, 
+  initialPresentations, 
+  initialClients, 
+  initialUsers, 
+  initialAnalyticsLogs, 
+  initialFeedbacks, 
+  initialAuditLogs, 
+  DEFAULT_FIELDS, 
+  DEFAULT_TARGET_AUDIENCES 
+} from './data/mockData';
+import { Presentation, Category, Client, ViewMode, User, ViewAnalyticsLog, ClientFeedback, AuditLog } from './types';
+import { generatePresentationPDF } from './utils/pdfExport';
+import { FileText, Plus, LayoutGrid, List, Folders, Briefcase } from 'lucide-react';
+import { subscribeToCollection, upsertItem, removeItem, replaceCollection } from './lib/firestoreService';
+
+export default function App() {
+  // Users & Auth State
+  const [users, setUsers] = useState<User[]>(() => {
+    try {
+      const saved = localStorage.getItem('mamuthub_users');
+      return saved ? JSON.parse(saved) : initialUsers;
+    } catch {
+      return initialUsers;
+    }
+  });
+
+  const [currentUser, setCurrentUser] = useState<User | null>(() => {
+    try {
+      const saved = localStorage.getItem('mamuthub_auth_user');
+      if (saved) return JSON.parse(saved);
+      return null;
+    } catch {
+      return null;
+    }
+  });
+
+  // Save users & currentUser to localStorage
+  useEffect(() => {
+    try {
+      localStorage.setItem('mamuthub_users', JSON.stringify(users));
+    } catch {
+      // ignore
+    }
+  }, [users]);
+
+  useEffect(() => {
+    try {
+      if (currentUser) {
+        localStorage.setItem('mamuthub_auth_user', JSON.stringify(currentUser));
+      } else {
+        localStorage.removeItem('mamuthub_auth_user');
+      }
+    } catch {
+      // ignore
+    }
+  }, [currentUser]);
+
+  const [presentations, setPresentations] = useState<Presentation[]>(initialPresentations);
+  const [categories, setCategories] = useState<Category[]>(initialCategories);
+  const [clients, setClients] = useState<Client[]>(initialClients);
+
+  // New modules state
+  const [analyticsLogs, setAnalyticsLogs] = useState<ViewAnalyticsLog[]>(initialAnalyticsLogs);
+  const [feedbacks, setFeedbacks] = useState<ClientFeedback[]>(initialFeedbacks);
+  const [auditLogs, setAuditLogs] = useState<AuditLog[]>(initialAuditLogs);
+
+  // Firestore Subscriptions
+  useEffect(() => {
+    const unsubPres = subscribeToCollection<Presentation>('presentations', initialPresentations, setPresentations);
+    const unsubCats = subscribeToCollection<Category>('categories', initialCategories, setCategories);
+    const unsubCli = subscribeToCollection<Client>('clients', initialClients, setClients);
+    const unsubUsers = subscribeToCollection<User>('users', initialUsers, setUsers);
+    const unsubAnalytics = subscribeToCollection<ViewAnalyticsLog>('analytics', initialAnalyticsLogs, setAnalyticsLogs);
+    const unsubFeedbacks = subscribeToCollection<ClientFeedback>('feedbacks', initialFeedbacks, setFeedbacks);
+    const unsubAudit = subscribeToCollection<AuditLog>('auditLogs', initialAuditLogs, setAuditLogs);
+
+    return () => {
+      unsubPres();
+      unsubCats();
+      unsubCli();
+      unsubUsers();
+      unsubAnalytics();
+      unsubFeedbacks();
+      unsubAudit();
+    };
+  }, []);
+
+  const handleSendFeedback = (newFb: Omit<ClientFeedback, 'id' | 'createdAt' | 'status'>) => {
+    const created: ClientFeedback = {
+      ...newFb,
+      id: `fb-${Date.now()}`,
+      status: 'Yeni',
+      createdAt: new Date().toISOString().replace('T', ' ').substring(0, 16),
+    };
+    setFeedbacks((prev) => [created, ...prev]);
+    upsertItem('feedbacks', created);
+
+    // Add audit log for feedback
+    const audit: AuditLog = {
+      id: `audit-${Date.now()}`,
+      userId: 'client-portal',
+      userName: newFb.clientName,
+      userRole: 'viewer',
+      action: 'Müşteri Not / Geri Bildirim İletti',
+      details: `"${newFb.presentationTitle}" sunumu için ${newFb.feedbackType} gönderildi.`,
+      timestamp: new Date().toISOString().replace('T', ' ').substring(0, 16),
+    };
+    setAuditLogs((prev) => [audit, ...prev]);
+    upsertItem('auditLogs', audit);
+  };
+
+  const handleUpdateFeedbackStatus = (id: string, status: 'Yeni' | 'İnceleniyor' | 'Tamamlandı') => {
+    setFeedbacks((prev) => {
+      const updated = prev.map((f) => f.id === id ? { ...f, status } : f);
+      const target = updated.find((f) => f.id === id);
+      if (target) upsertItem('feedbacks', target);
+      return updated;
+    });
+  };
+
+  const handleDeleteFeedback = (id: string) => {
+    setFeedbacks((prev) => prev.filter((f) => f.id !== id));
+    removeItem('feedbacks', id);
+  };
+
+  const unreadFeedbacksCount = useMemo(() => {
+    return feedbacks.filter((f) => f.status === 'Yeni').length;
+  }, [feedbacks]);
+
+  const [allFields, setAllFields] = useState<string[]>(DEFAULT_FIELDS);
+  const [allTargetAudiences, setAllTargetAudiences] = useState<string[]>(DEFAULT_TARGET_AUDIENCES);
+
+  const [currentView, setCurrentView] = useState<ViewMode>('panel');
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+  const [selectedFields, setSelectedFields] = useState<string[]>([]);
+  const [selectedTargetAudiences, setSelectedTargetAudiences] = useState<string[]>([]);
+  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [displayMode, setDisplayMode] = useState<'grid' | 'list'>('grid');
+
+  // Modals state
+  const [activeStudioPresentation, setActiveStudioPresentation] = useState<Presentation | null>(null);
+  const [isManageCategoriesOpen, setIsManageCategoriesOpen] = useState<boolean>(false);
+  const [isManageTaxonomyOpen, setIsManageTaxonomyOpen] = useState<boolean>(false);
+  const [isBackupModalOpen, setIsBackupModalOpen] = useState<boolean>(false);
+  const [isUploadPdfModalOpen, setIsUploadPdfModalOpen] = useState<boolean>(false);
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState<boolean>(false);
+
+  // Check URL parameters for standalone Client Portal link (?portal=CLIENT_ID or ?id=CLIENT_ID)
+  const [standalonePortalClient, setStandalonePortalClient] = useState<Client | null>(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const portalId = params.get('portal') || params.get('id');
+      if (portalId) {
+        const found = initialClients.find((c) => c.id === portalId);
+        return found || null;
+      }
+    } catch {
+      // ignore
+    }
+    return null;
+  });
+
+  // Dynamic Category count update
+  const categoriesWithCounts = useMemo(() => {
+    return categories.map((cat) => {
+      const count = presentations.filter(
+        (p) => p.category.toLowerCase() === cat.name.toLowerCase()
+      ).length;
+      return { ...cat, count };
+    });
+  }, [categories, presentations]);
+
+  // Favorites count
+  const favoritesCount = useMemo(() => {
+    return presentations.filter((p) => p.isFavorite).length;
+  }, [presentations]);
+
+  // Filtered Presentations
+  const filteredPresentations = useMemo(() => {
+    return presentations.filter((p) => {
+      // Category filter
+      if (selectedCategory) {
+        if (p.category.toLowerCase() !== selectedCategory.toLowerCase()) {
+          return false;
+        }
+      }
+
+      // View filter
+      if (currentView === 'favorites') {
+        if (!p.isFavorite) return false;
+      }
+
+      // Field (Alan) filter (if any field selected, presentation must have at least one matching field)
+      if (selectedFields.length > 0) {
+        if (!p.fields || !p.fields.some((f) => selectedFields.includes(f))) {
+          return false;
+        }
+      }
+
+      // Target Audience (Hedef Kitle) filter (if any audience selected, presentation must match at least one)
+      if (selectedTargetAudiences.length > 0) {
+        if (!p.targetAudiences || !p.targetAudiences.some((a) => selectedTargetAudiences.includes(a))) {
+          return false;
+        }
+      }
+
+      // Search query filter
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase();
+        const matchesCode = p.code.toLowerCase().includes(q);
+        const matchesTitle = p.title.toLowerCase().includes(q);
+        const matchesCategory = p.category.toLowerCase().includes(q);
+        const matchesTags = p.tags?.some((t) => t.toLowerCase().includes(q));
+        const matchesFields = p.fields?.some((f) => f.toLowerCase().includes(q));
+        const matchesAudiences = p.targetAudiences?.some((a) => a.toLowerCase().includes(q));
+
+        if (!matchesCode && !matchesTitle && !matchesCategory && !matchesTags && !matchesFields && !matchesAudiences) {
+          return false;
+        }
+      }
+
+      return true;
+    });
+  }, [presentations, currentView, selectedCategory, selectedFields, selectedTargetAudiences, searchQuery]);
+
+  // Filter Handlers
+  const handleToggleField = (field: string) => {
+    setSelectedFields((prev) =>
+      prev.includes(field) ? prev.filter((f) => f !== field) : [...prev, field]
+    );
+  };
+
+  const handleToggleTargetAudience = (audience: string) => {
+    setSelectedTargetAudiences((prev) =>
+      prev.includes(audience) ? prev.filter((a) => a !== audience) : [...prev, audience]
+    );
+  };
+
+  const handleClearFilters = () => {
+    setSelectedFields([]);
+    setSelectedTargetAudiences([]);
+    setSelectedCategory(null);
+  };
+
+  // Handlers
+  const handleToggleFavorite = (id: string) => {
+    setPresentations((prev) => {
+      const updated = prev.map((p) => {
+        if (p.id === id) {
+          const item = { ...p, isFavorite: !p.isFavorite };
+          upsertItem('presentations', item);
+          return item;
+        }
+        return p;
+      });
+      return updated;
+    });
+  };
+
+  const handleDeletePresentation = (id: string) => {
+    if (window.confirm('Bu sunumu silmek istediğinizden emin misiniz?')) {
+      setPresentations((prev) => prev.filter((p) => p.id !== id));
+      removeItem('presentations', id);
+    }
+  };
+
+  const handleAddNewPresentation = () => {
+    setIsUploadPdfModalOpen(true);
+  };
+
+  const handleAddUploadedPresentation = (newPres: Presentation) => {
+    setPresentations([newPres, ...presentations]);
+    setActiveStudioPresentation(newPres);
+    upsertItem('presentations', newPres);
+  };
+
+  const handleSavePresentation = (updated: Presentation) => {
+    setPresentations((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
+    upsertItem('presentations', updated);
+  };
+
+  // Category Handlers
+  const handleAddCategory = (categoryName: string) => {
+    const formatted = categoryName.trim().toUpperCase();
+    const exists = categories.some((c) => c.name.toLowerCase() === formatted.toLowerCase());
+    if (exists) return;
+
+    const newCat: Category = {
+      id: `cat-${Date.now()}`,
+      name: formatted,
+      slug: formatted.toLowerCase().replace(/\s+/g, '-'),
+      count: 0,
+    };
+    setCategories([...categories, newCat]);
+    upsertItem('categories', newCat);
+  };
+
+  // Taxonomy Handlers for Fields & Target Audiences
+  const handleAddField = (field: string) => {
+    const trimmed = field.trim();
+    if (!trimmed) return;
+    setAllFields((prev) => (prev.includes(trimmed) ? prev : [...prev, trimmed]));
+  };
+
+  const handleEditField = (oldName: string, newName: string) => {
+    const trimmed = newName.trim();
+    if (!trimmed || trimmed === oldName) return;
+
+    setAllFields((prev) => prev.map((f) => (f === oldName ? trimmed : f)));
+    setSelectedFields((prev) => prev.map((f) => (f === oldName ? trimmed : f)));
+    setPresentations((prev) => {
+      const updated = prev.map((p) => {
+        if (!p.fields || !p.fields.includes(oldName)) return p;
+        const newPres = {
+          ...p,
+          fields: p.fields.map((f) => (f === oldName ? trimmed : f)),
+        };
+        upsertItem('presentations', newPres);
+        return newPres;
+      });
+      return updated;
+    });
+  };
+
+  const handleDeleteField = (field: string) => {
+    setAllFields((prev) => prev.filter((f) => f !== field));
+    setSelectedFields((prev) => prev.filter((f) => f !== field));
+    setPresentations((prev) => {
+      const updated = prev.map((p) => {
+        if (!p.fields || !p.fields.includes(field)) return p;
+        const newPres = {
+          ...p,
+          fields: p.fields.filter((f) => f !== field),
+        };
+        upsertItem('presentations', newPres);
+        return newPres;
+      });
+      return updated;
+    });
+  };
+
+  const handleAddTargetAudience = (audience: string) => {
+    const trimmed = audience.trim();
+    if (!trimmed) return;
+    setAllTargetAudiences((prev) => (prev.includes(trimmed) ? prev : [...prev, trimmed]));
+  };
+
+  const handleEditTargetAudience = (oldName: string, newName: string) => {
+    const trimmed = newName.trim();
+    if (!trimmed || trimmed === oldName) return;
+
+    setAllTargetAudiences((prev) => prev.map((a) => (a === oldName ? trimmed : a)));
+    setSelectedTargetAudiences((prev) => prev.map((a) => (a === oldName ? trimmed : a)));
+    setPresentations((prev) => {
+      const updated = prev.map((p) => {
+        if (!p.targetAudiences || !p.targetAudiences.includes(oldName)) return p;
+        const newPres = {
+          ...p,
+          targetAudiences: p.targetAudiences.map((a) => (a === oldName ? trimmed : a)),
+        };
+        upsertItem('presentations', newPres);
+        return newPres;
+      });
+      return updated;
+    });
+  };
+
+  const handleDeleteTargetAudience = (audience: string) => {
+    setAllTargetAudiences((prev) => prev.filter((a) => a !== audience));
+    setSelectedTargetAudiences((prev) => prev.filter((a) => a !== audience));
+    setPresentations((prev) => {
+      const updated = prev.map((p) => {
+        if (!p.targetAudiences || !p.targetAudiences.includes(audience)) return p;
+        const newPres = {
+          ...p,
+          targetAudiences: p.targetAudiences.filter((a) => a !== audience),
+        };
+        upsertItem('presentations', newPres);
+        return newPres;
+      });
+      return updated;
+    });
+  };
+
+  const handleEditCategory = (oldName: string, newName: string) => {
+    setCategories((prev) => {
+      const updated = prev.map((c) => {
+        if (c.name === oldName) {
+          const item = { ...c, name: newName };
+          upsertItem('categories', item);
+          return item;
+        }
+        return c;
+      });
+      return updated;
+    });
+
+    // Update category name on all presentations
+    setPresentations((prev) => {
+      const updated = prev.map((p) => {
+        if (p.category === oldName) {
+          const item = { ...p, category: newName };
+          upsertItem('presentations', item);
+          return item;
+        }
+        return p;
+      });
+      return updated;
+    });
+
+    if (selectedCategory === oldName) {
+      setSelectedCategory(newName);
+    }
+  };
+
+  const handleDeleteCategory = (catName: string) => {
+    const foundCat = categories.find((c) => c.name === catName);
+    if (foundCat) removeItem('categories', foundCat.id);
+    setCategories((prev) => prev.filter((c) => c.name !== catName));
+
+    // Move presentations to GENEL SUNUMLAR
+    setPresentations((prev) => {
+      const updated = prev.map((p) => {
+        if (p.category === catName) {
+          const item = { ...p, category: 'GENEL SUNUMLAR' };
+          upsertItem('presentations', item);
+          return item;
+        }
+        return p;
+      });
+      return updated;
+    });
+
+    if (selectedCategory === catName) {
+      setSelectedCategory(null);
+    }
+  };
+
+  // Client Handlers
+  const handleAddClient = (newClient: Client) => {
+    setClients([newClient, ...clients]);
+    upsertItem('clients', newClient);
+  };
+
+  const handleUpdateClient = (updatedClient: Client) => {
+    setClients((prev) => prev.map((c) => (c.id === updatedClient.id ? updatedClient : c)));
+    upsertItem('clients', updatedClient);
+
+    // Sync companyName to assigned presentations if changed
+    setPresentations((prev) => {
+      const updated = prev.map((p) => {
+        if (p.clientId === updatedClient.id) {
+          const item = { ...p, clientName: updatedClient.companyName };
+          upsertItem('presentations', item);
+          return item;
+        }
+        return p;
+      });
+      return updated;
+    });
+  };
+
+  const handleDeleteClient = (clientId: string) => {
+    setClients((prev) => prev.filter((c) => c.id !== clientId));
+    removeItem('clients', clientId);
+
+    // Remove client reference from assigned presentations
+    setPresentations((prev) => {
+      const updated = prev.map((p) => {
+        if (p.clientId === clientId) {
+          const item = { ...p, clientId: undefined, clientName: undefined };
+          upsertItem('presentations', item);
+          return item;
+        }
+        return p;
+      });
+      return updated;
+    });
+  };
+
+  const handleSaveAssignments = (clientId: string, selectedPresentationIds: string[]) => {
+    const client = clients.find((c) => c.id === clientId);
+
+    setPresentations((prev) => {
+      const updated = prev.map((p) => {
+        if (selectedPresentationIds.includes(p.id)) {
+          const item = {
+            ...p,
+            clientId: client?.id,
+            clientName: client?.companyName,
+          };
+          upsertItem('presentations', item);
+          return item;
+        } else if (p.clientId === clientId) {
+          const item = {
+            ...p,
+            clientId: undefined,
+            clientName: undefined,
+          };
+          upsertItem('presentations', item);
+          return item;
+        }
+        return p;
+      });
+      return updated;
+    });
+  };
+
+  const handleExportBackup = () => {
+    const backupData = {
+      version: '1.0',
+      exportedAt: new Date().toISOString(),
+      presentations,
+      categories,
+      clients,
+    };
+    const blob = new Blob([JSON.stringify(backupData, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `MAMUTHUB_Yedek_${new Date().toISOString().split('T')[0]}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleRestoreData = (restored: {
+    presentations?: Presentation[];
+    categories?: Category[];
+    clients?: Client[];
+  }) => {
+    if (restored.presentations && Array.isArray(restored.presentations)) {
+      setPresentations(restored.presentations);
+      replaceCollection('presentations', restored.presentations);
+    }
+    if (restored.categories && Array.isArray(restored.categories)) {
+      setCategories(restored.categories);
+      replaceCollection('categories', restored.categories);
+    }
+    if (restored.clients && Array.isArray(restored.clients)) {
+      setClients(restored.clients);
+      replaceCollection('clients', restored.clients);
+    }
+  };
+
+  // User Management Handlers
+  const handleAddUser = (newUser: Omit<User, 'id' | 'createdAt'>) => {
+    const user: User = {
+      ...newUser,
+      id: `user-${Date.now()}`,
+      createdAt: new Date().toISOString().split('T')[0],
+    };
+    setUsers((prev) => [user, ...prev]);
+    upsertItem('users', user);
+  };
+
+  const handleUpdateUser = (updatedUser: User) => {
+    setUsers((prev) => prev.map((u) => (u.id === updatedUser.id ? updatedUser : u)));
+    upsertItem('users', updatedUser);
+    if (currentUser?.id === updatedUser.id) {
+      setCurrentUser(updatedUser);
+    }
+  };
+
+  const handleDeleteUser = (userId: string) => {
+    setUsers((prev) => prev.filter((u) => u.id !== userId));
+    removeItem('users', userId);
+  };
+
+  const handleLogout = () => {
+    setCurrentUser(null);
+  };
+
+  const handleLoginSuccess = (user: User) => {
+    setCurrentUser(user);
+    setUsers((prev) => prev.map((u) => (u.id === user.id ? user : u)));
+  };
+
+  const getViewTitle = () => {
+    if (selectedCategory) return selectedCategory;
+    switch (currentView) {
+      case 'all':
+        return 'Tüm Sunumlar';
+      case 'favorites':
+        return 'Favori Sunumlar';
+      case 'customers':
+        return 'Müşteri Yönetimi';
+      case 'analytics':
+        return 'Sunum Analitiği';
+      case 'feedback':
+        return 'Müşteri Notları & Geri Bildirimler';
+      case 'users':
+        return 'Kullanıcı & Yetki Yönetimi';
+      default:
+        return 'Panel';
+    }
+  };
+
+  if (standalonePortalClient) {
+    return (
+      <ClientPortalModal
+        client={standalonePortalClient}
+        assignedPresentations={presentations.filter((p) => p.clientId === standalonePortalClient.id)}
+        onClose={() => {
+          window.history.replaceState({}, '', window.location.pathname);
+          setStandalonePortalClient(null);
+        }}
+        onSendFeedback={handleSendFeedback}
+      />
+    );
+  }
+
+  // Unauthenticated screen
+  if (!currentUser) {
+    return <LoginScreen users={users} onLoginSuccess={handleLoginSuccess} />;
+  }
+
+  return (
+    <div className="flex h-screen bg-[#0b0f19] text-slate-100 font-sans overflow-hidden antialiased selection:bg-blue-600 selection:text-white">
+      {/* Sidebar Navigation */}
+      <Sidebar
+        currentView={currentView}
+        onSelectView={setCurrentView}
+        categories={categoriesWithCounts}
+        selectedCategory={selectedCategory}
+        onSelectCategory={setSelectedCategory}
+        onOpenAddCategory={() => setIsManageCategoriesOpen(true)}
+        onOpenManageTaxonomy={() => setIsManageTaxonomyOpen(true)}
+        totalPresentationsCount={presentations.length}
+        favoritesCount={favoritesCount}
+        unreadFeedbacksCount={unreadFeedbacksCount}
+        isMobileOpen={isMobileSidebarOpen}
+        onCloseMobile={() => setIsMobileSidebarOpen(false)}
+        currentUser={currentUser}
+        onLogout={handleLogout}
+      />
+
+      {/* Main Container Area */}
+      <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+        {/* Top Header */}
+        <Header
+          searchQuery={searchQuery}
+          onSearchChange={setSearchQuery}
+          onExportBackup={handleExportBackup}
+          onImportBackup={() => setIsBackupModalOpen(true)}
+          onAddNewPresentation={handleAddNewPresentation}
+          onOpenMobileMenu={() => setIsMobileSidebarOpen(true)}
+          currentUser={currentUser}
+        />
+
+        {/* Scrollable Main Content */}
+        <main className="flex-1 overflow-y-auto p-4 sm:p-6 md:p-8 space-y-5 sm:space-y-6">
+          {currentView === 'customers' ? (
+            <CustomerManagement
+              clients={clients}
+              presentations={presentations}
+              onAddClient={handleAddClient}
+              onUpdateClient={handleUpdateClient}
+              onDeleteClient={handleDeleteClient}
+              onOpenStudio={(pres) => setActiveStudioPresentation(pres)}
+              onSaveAssignments={handleSaveAssignments}
+            />
+          ) : currentView === 'analytics' ? (
+            <AnalyticsView
+              analyticsLogs={analyticsLogs}
+              presentations={presentations}
+              clients={clients}
+            />
+          ) : currentView === 'feedback' ? (
+            <ClientFeedbackView
+              feedbacks={feedbacks}
+              onUpdateFeedbackStatus={handleUpdateFeedbackStatus}
+              onDeleteFeedback={handleDeleteFeedback}
+            />
+          ) : currentView === 'users' ? (
+            <UserManagement
+              users={users}
+              currentUser={currentUser}
+              auditLogs={auditLogs}
+              onAddUser={handleAddUser}
+              onUpdateUser={handleUpdateUser}
+              onDeleteUser={handleDeleteUser}
+            />
+          ) : (
+            <>
+              {/* View Control & Header Bar */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-800/80 pb-4 gap-4">
+                <div className="flex items-center gap-3">
+                  <h1 className="text-xl font-bold tracking-tight text-white">{getViewTitle()}</h1>
+                  {(selectedCategory || selectedFields.length > 0 || selectedTargetAudiences.length > 0) && (
+                    <button
+                      onClick={handleClearFilters}
+                      className="text-xs text-blue-400 hover:underline"
+                    >
+                      (Tüm Filtreleri Temizle)
+                    </button>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-3">
+                  {/* Category Management Button */}
+                  <button
+                    onClick={() => setIsManageCategoriesOpen(true)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 hover:border-slate-700 text-xs font-semibold text-slate-300 hover:text-white transition-all"
+                  >
+                    <Folders className="w-3.5 h-3.5 text-blue-400" />
+                    <span>Kategorileri Yönet</span>
+                  </button>
+
+                  {/* Grid vs List View Mode Switcher */}
+                  <div className="bg-slate-900 p-1 rounded-xl border border-slate-800 flex items-center gap-1">
+                    <button
+                      onClick={() => setDisplayMode('grid')}
+                      title="Kart Görünümü"
+                      className={`p-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all ${
+                        displayMode === 'grid'
+                          ? 'bg-blue-600 text-white shadow-md shadow-blue-600/30'
+                          : 'text-slate-400 hover:text-slate-200'
+                      }`}
+                    >
+                      <LayoutGrid className="w-3.5 h-3.5" />
+                      <span className="hidden md:inline">Kartlar</span>
+                    </button>
+                    <button
+                      onClick={() => setDisplayMode('list')}
+                      title="Liste Görünümü"
+                      className={`p-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all ${
+                        displayMode === 'list'
+                          ? 'bg-blue-600 text-white shadow-md shadow-blue-600/30'
+                          : 'text-slate-400 hover:text-slate-200'
+                      }`}
+                    >
+                      <List className="w-3.5 h-3.5" />
+                      <span className="hidden md:inline">Liste</span>
+                    </button>
+                  </div>
+
+                  <span className="text-xs font-semibold text-slate-400 bg-slate-900 px-3 py-1.5 rounded-xl border border-slate-800">
+                    {filteredPresentations.length} belge
+                  </span>
+                </div>
+              </div>
+
+              {/* Alan & Hedef Kitle Filter Bar */}
+              <FilterBar
+                presentations={presentations}
+                selectedFields={selectedFields}
+                selectedTargetAudiences={selectedTargetAudiences}
+                allFields={allFields}
+                allTargetAudiences={allTargetAudiences}
+                onToggleField={handleToggleField}
+                onToggleTargetAudience={handleToggleTargetAudience}
+                onClearFilters={handleClearFilters}
+                onOpenManageTaxonomy={() => setIsManageTaxonomyOpen(true)}
+              />
+
+              {/* Presentation Display: Grid or List */}
+              {filteredPresentations.length === 0 ? (
+                <div className="py-20 flex flex-col items-center justify-center text-center space-y-4 bg-[#121929]/50 border border-slate-800/80 rounded-2xl">
+                  <div className="w-14 h-14 rounded-2xl bg-blue-600/10 border border-blue-500/20 text-blue-400 flex items-center justify-center">
+                    <FileText className="w-7 h-7" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-bold text-white">Sunum Bulunamadı</h3>
+                    <p className="text-xs text-slate-400 mt-1 max-w-sm">
+                      Arama kriterlerinize veya seçili kategoriye uygun sunum bulunmuyor. Yeni PDF sunumu yükleyebilirsiniz.
+                    </p>
+                  </div>
+                  <button
+                    onClick={handleAddNewPresentation}
+                    className="flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold shadow-lg shadow-blue-600/20 transition-all"
+                  >
+                    <Plus className="w-4 h-4" />
+                    <span>PDF Sunum Yükle</span>
+                  </button>
+                </div>
+              ) : displayMode === 'grid' ? (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {filteredPresentations.map((presentation) => (
+                    <PresentationCard
+                      key={presentation.id}
+                      presentation={presentation}
+                      onToggleFavorite={handleToggleFavorite}
+                      onDelete={handleDeletePresentation}
+                      onOpenStudio={(p) => setActiveStudioPresentation(p)}
+                      onDownloadPDF={(p) => generatePresentationPDF(p)}
+                      onSelectField={handleToggleField}
+                      onSelectTargetAudience={handleToggleTargetAudience}
+                    />
+                  ))}
+                </div>
+              ) : (
+                <PresentationListView
+                  presentations={filteredPresentations}
+                  onToggleFavorite={handleToggleFavorite}
+                  onDelete={handleDeletePresentation}
+                  onOpenStudio={(p) => setActiveStudioPresentation(p)}
+                  onDownloadPDF={(p) => generatePresentationPDF(p)}
+                />
+              )}
+            </>
+          )}
+        </main>
+      </div>
+
+      {/* Presentation Studio / Viewer Modal */}
+      {activeStudioPresentation && (
+        <PresentationStudioModal
+          presentation={activeStudioPresentation}
+          categories={categories}
+          clients={clients}
+          allFields={allFields}
+          allTargetAudiences={allTargetAudiences}
+          onClose={() => setActiveStudioPresentation(null)}
+          onSave={handleSavePresentation}
+          onAddField={handleAddField}
+          onAddTargetAudience={handleAddTargetAudience}
+        />
+      )}
+
+      {/* Manage Categories Modal */}
+      {isManageCategoriesOpen && (
+        <ManageCategoriesModal
+          categories={categories}
+          onClose={() => setIsManageCategoriesOpen(false)}
+          onAddCategory={handleAddCategory}
+          onEditCategory={handleEditCategory}
+          onDeleteCategory={handleDeleteCategory}
+        />
+      )}
+
+      {/* Manage Taxonomy Modal (Alan ve Hedef Kitle Yönetimi) */}
+      {isManageTaxonomyOpen && (
+        <ManageTaxonomyModal
+          allFields={allFields}
+          allTargetAudiences={allTargetAudiences}
+          presentations={presentations}
+          onClose={() => setIsManageTaxonomyOpen(false)}
+          onAddField={handleAddField}
+          onEditField={handleEditField}
+          onDeleteField={handleDeleteField}
+          onAddTargetAudience={handleAddTargetAudience}
+          onEditTargetAudience={handleEditTargetAudience}
+          onDeleteTargetAudience={handleDeleteTargetAudience}
+        />
+      )}
+
+      {/* Backup Upload Modal */}
+      {isBackupModalOpen && (
+        <BackupModal
+          onClose={() => setIsBackupModalOpen(false)}
+          onRestoreData={handleRestoreData}
+        />
+      )}
+
+      {/* Upload PDF Modal */}
+      {isUploadPdfModalOpen && (
+        <UploadPdfModal
+          categories={categories}
+          allFields={allFields}
+          allTargetAudiences={allTargetAudiences}
+          onClose={() => setIsUploadPdfModalOpen(false)}
+          onAddPresentation={handleAddUploadedPresentation}
+          onAddField={handleAddField}
+          onAddTargetAudience={handleAddTargetAudience}
+        />
+      )}
+    </div>
+  );
+}
