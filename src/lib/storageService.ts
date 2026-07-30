@@ -1,7 +1,14 @@
+import {
+  uploadPdfToStorage,
+  uploadThumbnailToStorage,
+  uploadSlideImagesToStorage,
+} from './firebaseStorageService';
+
 // Service for persistent local storage using IndexedDB & LocalStorage
 // Handles large assets (PDF data URLs, extracted base64 slide images) that exceed Firestore's 1MB limit
 
 const DB_NAME = 'MamutHubDB';
+
 const DB_VERSION = 1;
 const PRESENTATIONS_STORE = 'presentations';
 const TAXONOMY_STORE = 'taxonomy';
@@ -133,8 +140,64 @@ export async function deleteLocalPresentation(id: string): Promise<void> {
   }
 }
 
-// Create safe payload for Firestore by stripping huge base64 strings and undefined values
-export function sanitizePresentationForFirestore<T extends Record<string, any>>(pres: T): T {
+// Downscale and compress an image data URL using HTML Canvas
+export async function compressImageDataUrl(
+  dataUrl: string,
+  maxWidth: number = 800,
+  quality: number = 0.65
+): Promise<string> {
+  if (!dataUrl || typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image/')) {
+    return dataUrl;
+  }
+  // Return early if already small (< 35 KB)
+  if (dataUrl.length < 35 * 1024) {
+    return dataUrl;
+  }
+
+  return new Promise((resolve) => {
+    // Timeout safety fallback (2 seconds max)
+    const timer = setTimeout(() => resolve(dataUrl), 2000);
+
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      clearTimeout(timer);
+      try {
+        const scale = Math.min(1, maxWidth / img.width);
+        const width = Math.max(1, Math.round(img.width * scale));
+        const height = Math.max(1, Math.round(img.height * scale));
+
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.imageSmoothingEnabled = true;
+          ctx.imageSmoothingQuality = 'medium';
+          ctx.fillStyle = '#FFFFFF';
+          ctx.fillRect(0, 0, width, height);
+          ctx.drawImage(img, 0, 0, width, height);
+          const compressed = canvas.toDataURL('image/jpeg', quality);
+          resolve(compressed.length < dataUrl.length ? compressed : dataUrl);
+        } else {
+          resolve(dataUrl);
+        }
+      } catch {
+        resolve(dataUrl);
+      }
+    };
+    img.onerror = () => {
+      clearTimeout(timer);
+      resolve(dataUrl);
+    };
+    img.src = dataUrl;
+  });
+}
+
+// Create safe payload for Firestore. First attempts to upload full 4K PDF and slide images
+// to Firebase Storage so ALL devices get 100% original crystal-clear resolution via HTTPS URLs.
+// Falls back to safe base64 compression if Cloud Storage is unavailable.
+export async function sanitizePresentationForFirestore<T extends Record<string, any>>(pres: T): Promise<T> {
   // 1. Deep clone & auto-purge all undefined keys
   const sanitized: Record<string, any> = JSON.parse(
     JSON.stringify(pres, (key, value) => {
@@ -143,23 +206,63 @@ export function sanitizePresentationForFirestore<T extends Record<string, any>>(
     })
   );
 
-  // 2. Strip huge PDF base64 data URLs for Firestore payload (stored permanently in local IndexedDB)
-  if (
-    typeof sanitized.pdfUrl === 'string' &&
-    (sanitized.pdfUrl.startsWith('data:') || sanitized.pdfUrl.length > 100 * 1024)
-  ) {
-    delete sanitized.pdfUrl;
+  const presId = sanitized.id || 'pres_' + Date.now();
+
+  // 2. Try Cloud Storage Upload for PDF binary
+  if (typeof sanitized.pdfUrl === 'string' && sanitized.pdfUrl.startsWith('data:')) {
+    const storagePdfUrl = await uploadPdfToStorage(presId, sanitized.pdfUrl);
+    if (storagePdfUrl) {
+      sanitized.pdfUrl = storagePdfUrl;
+    } else {
+      // Fallback: strip base64 PDF binary from Firestore payload (stored in local IndexedDB)
+      delete sanitized.pdfUrl;
+    }
   }
 
-  // 3. Keep thumbnail or first 2 slide images if extractedImages array is large
-  if (Array.isArray(sanitized.extractedImages) && sanitized.extractedImages.length > 2) {
-    sanitized.extractedImages = sanitized.extractedImages.slice(0, 2);
+  // 3. Try Cloud Storage Upload for cover Thumbnail
+  if (typeof sanitized.thumbnailUrl === 'string' && sanitized.thumbnailUrl.startsWith('data:image/')) {
+    const storageThumbUrl = await uploadThumbnailToStorage(presId, sanitized.thumbnailUrl);
+    if (storageThumbUrl) {
+      sanitized.thumbnailUrl = storageThumbUrl;
+    } else {
+      sanitized.thumbnailUrl = await compressImageDataUrl(sanitized.thumbnailUrl, 500, 0.7);
+    }
   }
 
-  // 4. Ensure total payload size is safely under Firestore's 1MB limit (max 500KB)
-  if (JSON.stringify(sanitized).length > 500 * 1024) {
+  // 4. Try Cloud Storage Upload for high-res slide images
+  if (Array.isArray(sanitized.extractedImages) && sanitized.extractedImages.length > 0) {
+    const hasBase64 = sanitized.extractedImages.some((img: string) => typeof img === 'string' && img.startsWith('data:image/'));
+    if (hasBase64) {
+      const storageSlideUrls = await uploadSlideImagesToStorage(presId, sanitized.extractedImages);
+      if (storageSlideUrls && storageSlideUrls.length > 0) {
+        sanitized.extractedImages = storageSlideUrls;
+      } else {
+        // Fallback: compress slide images for Firestore payload
+        const slideImages = sanitized.extractedImages.slice(0, 15);
+        const compressedList: string[] = [];
+        for (const imgUrl of slideImages) {
+          if (typeof imgUrl === 'string' && imgUrl.startsWith('data:image/')) {
+            const compressed = await compressImageDataUrl(imgUrl, 800, 0.7);
+            compressedList.push(compressed);
+          } else {
+            compressedList.push(imgUrl);
+          }
+        }
+        sanitized.extractedImages = compressedList;
+      }
+    }
+  }
+
+  // 5. Final safety boundary: if total payload is still over 600 KB, slice/remove extractedImages to guarantee Firestore write
+  if (JSON.stringify(sanitized).length > 600 * 1024) {
+    if (Array.isArray(sanitized.extractedImages)) {
+      sanitized.extractedImages = sanitized.extractedImages.slice(0, 3);
+    }
+  }
+  if (JSON.stringify(sanitized).length > 700 * 1024) {
     delete sanitized.extractedImages;
   }
 
   return sanitized as T;
 }
+

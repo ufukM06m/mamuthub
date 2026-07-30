@@ -32,6 +32,7 @@ import { Presentation, Category, Client, ViewMode, User, ViewAnalyticsLog, Clien
 import { generatePresentationPDF } from './utils/pdfExport';
 import { FileText, Plus, LayoutGrid, List, Folders, Briefcase } from 'lucide-react';
 import { subscribeToCollection, upsertItem, removeItem, replaceCollection } from './lib/firestoreService';
+import { deletePresentationFromStorage } from './lib/firebaseStorageService';
 import { 
   saveLocalPresentation, 
   getLocalPresentations, 
@@ -152,12 +153,22 @@ export default function App() {
   // Firestore Subscriptions
   useEffect(() => {
     const unsubPres = subscribeToCollection<Presentation>('presentations', [], (firestorePres) => {
-      getLocalPresentations<Presentation>().then((localPres) => {
+      getLocalPresentations<Presentation>().then(async (localPres) => {
         const deletedIds = getDeletedPresIds();
         const map = new Map<string, Presentation>();
 
         const validFirestore = firestorePres.filter((fp) => !deletedIds.includes(fp.id));
         const validLocal = localPres.filter((lp) => !deletedIds.includes(lp.id));
+
+        // If Firestore is empty AND local storage is empty AND test data was not explicitly deleted, seed initial sample data
+        if (firestorePres.length === 0 && validLocal.length === 0 && !deletedIds.includes('pres-1')) {
+          for (const initP of initialPresentations) {
+            const sanitized = await sanitizePresentationForFirestore(initP);
+            await upsertItem('presentations', sanitized);
+            await saveLocalPresentation(initP);
+          }
+          return;
+        }
 
         // 1. First add local user presentations from IndexedDB (they hold complete binary PDF data and local edits)
         validLocal.forEach((lp) => {
@@ -184,12 +195,13 @@ export default function App() {
         });
 
         // 3. For any user-created local presentation not yet in Firestore, upload it (skipping mock pres-1..4)
-        validLocal.forEach((lp) => {
+        for (const lp of validLocal) {
           const isMock = ['pres-1', 'pres-2', 'pres-3', 'pres-4'].includes(lp.id);
           if (!isMock && !validFirestore.some((fp) => fp.id === lp.id)) {
-            upsertItem('presentations', sanitizePresentationForFirestore(lp));
+            const sanitized = await sanitizePresentationForFirestore(lp);
+            await upsertItem('presentations', sanitized);
           }
-        });
+        }
 
         const merged = Array.from(map.values()).sort((a, b) => {
           const getTimestamp = (p: Presentation) => {
@@ -448,19 +460,24 @@ export default function App() {
   };
 
   // Handlers
-  const handleToggleFavorite = (id: string) => {
+  const handleToggleFavorite = async (id: string) => {
+    let targetItem: Presentation | null = null;
     setPresentations((prev) => {
       const updated = prev.map((p) => {
         if (p.id === id) {
           const item = { ...p, isFavorite: !p.isFavorite };
+          targetItem = item;
           saveLocalPresentation(item);
-          upsertItem('presentations', sanitizePresentationForFirestore(item));
           return item;
         }
         return p;
       });
       return updated;
     });
+    if (targetItem) {
+      const sanitized = await sanitizePresentationForFirestore(targetItem);
+      await upsertItem('presentations', sanitized);
+    }
   };
 
   const handleDeletePresentation = async (id: string) => {
@@ -469,8 +486,10 @@ export default function App() {
       setPresentations((prev) => prev.filter((p) => p.id !== id));
       await deleteLocalPresentation(id);
       await removeItem('presentations', id);
+      deletePresentationFromStorage(id).catch(() => {});
     }
   };
+
 
   const handleAddNewPresentation = () => {
     setIsUploadPdfModalOpen(true);
@@ -485,7 +504,8 @@ export default function App() {
     setPresentations((prev) => [timeStamped, ...prev.filter((p) => p.id !== timeStamped.id)]);
     setActiveStudioPresentation(timeStamped);
     await saveLocalPresentation(timeStamped);
-    await upsertItem('presentations', sanitizePresentationForFirestore(timeStamped));
+    const sanitized = await sanitizePresentationForFirestore(timeStamped);
+    await upsertItem('presentations', sanitized);
   };
 
   const handleSavePresentation = async (updated: Presentation) => {
@@ -498,7 +518,8 @@ export default function App() {
       setActiveStudioPresentationState(timeStamped);
     }
     await saveLocalPresentation(timeStamped);
-    await upsertItem('presentations', sanitizePresentationForFirestore(timeStamped));
+    const sanitized = await sanitizePresentationForFirestore(timeStamped);
+    await upsertItem('presentations', sanitized);
   };
 
   // Category Handlers
@@ -541,7 +562,7 @@ export default function App() {
           fields: p.fields.map((f) => (f === oldName ? trimmed : f)),
         };
         saveLocalPresentation(newPres);
-        upsertItem('presentations', sanitizePresentationForFirestore(newPres));
+        sanitizePresentationForFirestore(newPres).then((s) => upsertItem('presentations', s));
         return newPres;
       });
       return updated;
@@ -561,7 +582,7 @@ export default function App() {
           fields: p.fields.filter((f) => f !== field),
         };
         saveLocalPresentation(newPres);
-        upsertItem('presentations', sanitizePresentationForFirestore(newPres));
+        sanitizePresentationForFirestore(newPres).then((s) => upsertItem('presentations', s));
         return newPres;
       });
       return updated;
@@ -591,7 +612,7 @@ export default function App() {
           targetAudiences: p.targetAudiences.map((a) => (a === oldName ? trimmed : a)),
         };
         saveLocalPresentation(newPres);
-        upsertItem('presentations', sanitizePresentationForFirestore(newPres));
+        sanitizePresentationForFirestore(newPres).then((s) => upsertItem('presentations', s));
         return newPres;
       });
       return updated;
@@ -611,7 +632,7 @@ export default function App() {
           targetAudiences: p.targetAudiences.filter((a) => a !== audience),
         };
         saveLocalPresentation(newPres);
-        upsertItem('presentations', sanitizePresentationForFirestore(newPres));
+        sanitizePresentationForFirestore(newPres).then((s) => upsertItem('presentations', s));
         return newPres;
       });
       return updated;
@@ -637,7 +658,7 @@ export default function App() {
         if (p.category === oldName) {
           const item = { ...p, category: newName };
           saveLocalPresentation(item);
-          upsertItem('presentations', sanitizePresentationForFirestore(item));
+          sanitizePresentationForFirestore(item).then((s) => upsertItem('presentations', s));
           return item;
         }
         return p;
@@ -661,7 +682,7 @@ export default function App() {
         if (p.category === catName) {
           const item = { ...p, category: 'GENEL SUNUMLAR' };
           saveLocalPresentation(item);
-          upsertItem('presentations', sanitizePresentationForFirestore(item));
+          sanitizePresentationForFirestore(item).then((s) => upsertItem('presentations', s));
           return item;
         }
         return p;
@@ -782,7 +803,9 @@ export default function App() {
       clearDeletedPresIds();
       setPresentations(restored.presentations);
       restored.presentations.forEach((p) => saveLocalPresentation(p));
-      replaceCollection('presentations', restored.presentations.map(sanitizePresentationForFirestore));
+      Promise.all(restored.presentations.map((p) => sanitizePresentationForFirestore(p))).then((sanitizedList) => {
+        replaceCollection('presentations', sanitizedList);
+      });
     }
     if (restored.categories && Array.isArray(restored.categories)) {
       setCategories(restored.categories);
