@@ -121,9 +121,14 @@ export const PresentationStudioModal: React.FC<PresentationStudioModalProps> = (
     reader.readAsDataURL(file);
   };
 
-  const handleSaveAndClose = () => {
+  const handleClose = () => {
     onSave(presentation);
     onClose();
+  };
+
+  const updateAndSavePres = (updated: Presentation) => {
+    setPresentation(updated);
+    onSave(updated);
   };
 
   return (
@@ -132,7 +137,7 @@ export const PresentationStudioModal: React.FC<PresentationStudioModalProps> = (
       <div className="min-h-16 py-2 px-3 sm:px-6 bg-[#0d1424] border-b border-slate-800/80 flex flex-wrap items-center justify-between gap-2.5 shrink-0">
         <div className="flex items-center gap-2.5 sm:gap-4 min-w-0 flex-1">
           <button
-            onClick={onClose}
+            onClick={handleClose}
             className="p-1.5 sm:p-2 rounded-lg bg-slate-900 border border-slate-800 text-slate-400 hover:text-white hover:bg-slate-800 transition-colors shrink-0"
             title="Geri Dön"
           >
@@ -185,7 +190,7 @@ export const PresentationStudioModal: React.FC<PresentationStudioModalProps> = (
 
           {/* Kaydet & Kapat */}
           <button
-            onClick={handleSaveAndClose}
+            onClick={handleClose}
             title="Kaydet ve Kapat"
             className="flex items-center gap-1.5 px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white text-xs font-semibold transition-all"
           >
@@ -223,7 +228,7 @@ export const PresentationStudioModal: React.FC<PresentationStudioModalProps> = (
               <input
                 type="text"
                 value={presentation.code}
-                onChange={(e) => setPresentation({ ...presentation, code: e.target.value })}
+                onChange={(e) => updateAndSavePres({ ...presentation, code: e.target.value })}
                 className="w-full bg-slate-900 border border-slate-700/80 rounded-lg p-2.5 text-xs text-white font-mono focus:outline-none focus:border-blue-500"
               />
             </div>
@@ -234,7 +239,7 @@ export const PresentationStudioModal: React.FC<PresentationStudioModalProps> = (
               <input
                 type="text"
                 value={presentation.title}
-                onChange={(e) => setPresentation({ ...presentation, title: e.target.value })}
+                onChange={(e) => updateAndSavePres({ ...presentation, title: e.target.value })}
                 className="w-full bg-slate-900 border border-slate-700/80 rounded-lg p-2.5 text-xs text-white focus:outline-none focus:border-blue-500"
               />
             </div>
@@ -244,8 +249,8 @@ export const PresentationStudioModal: React.FC<PresentationStudioModalProps> = (
               <label className="text-xs font-semibold text-slate-400 block mb-1">Kategori</label>
               <select
                 value={presentation.category}
-                onChange={(e) => setPresentation({ ...presentation, category: e.target.value })}
-                className="w-full bg-slate-900 border border-slate-700/80 rounded-lg p-2.5 text-xs text-white focus:outline-none focus:border-blue-500"
+                onChange={(e) => updateAndSavePres({ ...presentation, category: e.target.value })}
+                className="w-full bg-slate-900 border border-slate-700/80 rounded-lg p-2.5 text-xs text-white focus:outline-none focus:border-blue-500 font-semibold text-blue-300"
               >
                 {categories.map((c) => (
                   <option key={c.id} value={c.name}>
@@ -267,7 +272,7 @@ export const PresentationStudioModal: React.FC<PresentationStudioModalProps> = (
                 type="number"
                 value={presentation.pageCount || 1}
                 onChange={(e) =>
-                  setPresentation({ ...presentation, pageCount: parseInt(e.target.value) || 1 })
+                  updateAndSavePres({ ...presentation, pageCount: parseInt(e.target.value) || 1 })
                 }
                 className="w-full bg-slate-900 border border-slate-700/80 rounded-lg p-2.5 text-xs text-white focus:outline-none focus:border-blue-500"
               />
@@ -279,7 +284,7 @@ export const PresentationStudioModal: React.FC<PresentationStudioModalProps> = (
               <textarea
                 rows={3}
                 value={presentation.description || ''}
-                onChange={(e) => setPresentation({ ...presentation, description: e.target.value })}
+                onChange={(e) => updateAndSavePres({ ...presentation, description: e.target.value })}
                 className="w-full bg-slate-900 border border-slate-700/80 rounded-lg p-2.5 text-xs text-white focus:outline-none focus:border-blue-500 resize-none"
               />
             </div>
@@ -308,7 +313,7 @@ export const PresentationStudioModal: React.FC<PresentationStudioModalProps> = (
                         const updated = isSelected
                           ? current.filter((f) => f !== field)
                           : [...current, field];
-                        setPresentation({ ...presentation, fields: updated });
+                        updateAndSavePres({ ...presentation, fields: updated });
                       }}
                       className={`px-2 py-0.5 rounded text-[11px] font-medium border transition-all ${
                         isSelected
@@ -335,7 +340,7 @@ export const PresentationStudioModal: React.FC<PresentationStudioModalProps> = (
                       if (val) {
                         const current = presentation.fields || [];
                         if (!current.includes(val)) {
-                          setPresentation({ ...presentation, fields: [...current, val] });
+                          updateAndSavePres({ ...presentation, fields: [...current, val] });
                         }
                         if (onAddField) onAddField(val);
                         setNewCustomField('');
@@ -352,7 +357,7 @@ export const PresentationStudioModal: React.FC<PresentationStudioModalProps> = (
                     if (val) {
                       const current = presentation.fields || [];
                       if (!current.includes(val)) {
-                        setPresentation({ ...presentation, fields: [...current, val] });
+                        updateAndSavePres({ ...presentation, fields: [...current, val] });
                       }
                       if (onAddField) onAddField(val);
                       setNewCustomField('');
@@ -390,7 +395,7 @@ export const PresentationStudioModal: React.FC<PresentationStudioModalProps> = (
                         const updated = isSelected
                           ? current.filter((a) => a !== audience)
                           : [...current, audience];
-                        setPresentation({ ...presentation, targetAudiences: updated });
+                        updateAndSavePres({ ...presentation, targetAudiences: updated });
                       }}
                       className={`px-2 py-0.5 rounded text-[11px] font-medium border transition-all ${
                         isSelected
@@ -417,7 +422,7 @@ export const PresentationStudioModal: React.FC<PresentationStudioModalProps> = (
                       if (val) {
                         const current = presentation.targetAudiences || [];
                         if (!current.includes(val)) {
-                          setPresentation({ ...presentation, targetAudiences: [...current, val] });
+                          updateAndSavePres({ ...presentation, targetAudiences: [...current, val] });
                         }
                         if (onAddTargetAudience) onAddTargetAudience(val);
                         setNewCustomAudience('');
@@ -434,7 +439,7 @@ export const PresentationStudioModal: React.FC<PresentationStudioModalProps> = (
                     if (val) {
                       const current = presentation.targetAudiences || [];
                       if (!current.includes(val)) {
-                        setPresentation({ ...presentation, targetAudiences: [...current, val] });
+                        updateAndSavePres({ ...presentation, targetAudiences: [...current, val] });
                       }
                       if (onAddTargetAudience) onAddTargetAudience(val);
                       setNewCustomAudience('');

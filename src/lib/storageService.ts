@@ -67,6 +67,32 @@ export function clearDeletedPresIds(): void {
   }
 }
 
+// Persistent Favorites in localStorage
+export function getFavoritePresIds(): string[] {
+  try {
+    const saved = localStorage.getItem('mamuthub_favorites');
+    return saved ? JSON.parse(saved) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveFavoritePresIds(favIds: string[]): void {
+  try {
+    localStorage.setItem('mamuthub_favorites', JSON.stringify(favIds));
+  } catch {
+    // ignore
+  }
+}
+
+export function toggleFavoritePresId(id: string): boolean {
+  const current = getFavoritePresIds();
+  const exists = current.includes(id);
+  const updated = exists ? current.filter((favId) => favId !== id) : [...current, id];
+  saveFavoritePresIds(updated);
+  return !exists;
+}
+
 // Save full presentation (including large base64 pdfUrl and extractedImages) to IndexedDB
 export async function saveLocalPresentation<T extends { id: string; pdfUrl?: string; extractedImages?: string[] }>(presentation: T): Promise<void> {
   // If user un-deletes or re-saves, remove from deleted IDs
@@ -93,11 +119,8 @@ export async function saveLocalPresentation<T extends { id: string; pdfUrl?: str
           toSave = {
             ...existing,
             ...presentation,
-            pdfUrl: presentation.pdfUrl || existing.pdfUrl,
-            extractedImages:
-              (presentation.extractedImages && presentation.extractedImages.length >= (existing.extractedImages?.length || 0))
-                ? presentation.extractedImages
-                : (existing.extractedImages || presentation.extractedImages),
+            pdfUrl: presentation.pdfUrl !== undefined ? presentation.pdfUrl : existing.pdfUrl,
+            extractedImages: presentation.extractedImages !== undefined ? presentation.extractedImages : existing.extractedImages,
           };
         }
         const putReq = store.put(toSave);
@@ -112,7 +135,7 @@ export async function saveLocalPresentation<T extends { id: string; pdfUrl?: str
     });
   } catch (err) {
     console.warn('Failed to save presentation to IndexedDB:', err);
-    // LocalStorage fallback for non-huge items
+    // LocalStorage fallback for non-huge items or metadata
     try {
       const saved = localStorage.getItem('mamuthub_local_presentations');
       const list: T[] = saved ? JSON.parse(saved) : [];
@@ -159,6 +182,26 @@ export async function deleteLocalPresentation(id: string): Promise<void> {
     });
   } catch (err) {
     console.warn('Failed to delete presentation from IndexedDB:', err);
+  }
+}
+
+// Purge all local presentation records from IndexedDB and LocalStorage
+export async function purgeAllLocalPresentations(): Promise<void> {
+  try {
+    const db = await openDB();
+    const tx = db.transaction(PRESENTATIONS_STORE, 'readwrite');
+    const store = tx.objectStore(PRESENTATIONS_STORE);
+    store.clear();
+  } catch (err) {
+    console.warn('Failed to clear IndexedDB presentations:', err);
+  }
+
+  try {
+    localStorage.removeItem('mamuthub_local_presentations');
+    localStorage.removeItem('mamuthub_deleted_pres_ids');
+    localStorage.removeItem('mamuthub_favorites');
+  } catch {
+    // ignore
   }
 }
 

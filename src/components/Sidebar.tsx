@@ -12,6 +12,7 @@ import {
   ShieldCheck,
   BarChart3,
   MessageSquare,
+  Settings,
   X
 } from 'lucide-react';
 import { Category, ViewMode, User } from '../types';
@@ -24,6 +25,7 @@ interface SidebarProps {
   onSelectCategory: (categoryName: string | null) => void;
   onOpenAddCategory: () => void;
   onOpenManageTaxonomy?: () => void;
+  onOpenBackupModal?: () => void;
   totalPresentationsCount: number;
   favoritesCount: number;
   unreadFeedbacksCount?: number;
@@ -41,6 +43,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onSelectCategory,
   onOpenAddCategory,
   onOpenManageTaxonomy,
+  onOpenBackupModal,
   totalPresentationsCount,
   favoritesCount,
   unreadFeedbacksCount = 0,
@@ -259,6 +262,26 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 </div>
                 <span className="text-[10px] bg-amber-500/10 text-amber-400 border border-amber-500/20 px-1.5 py-0.5 rounded font-mono">
                   YÖNET
+                </span>
+              </button>
+            )}
+
+            {/* Sistem Ayarları & Yedekleme */}
+            {onOpenBackupModal && (
+              <button
+                onClick={() =>
+                  handleItemClick(() => {
+                    onOpenBackupModal();
+                  })
+                }
+                className="w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-sm font-medium text-slate-300 hover:bg-slate-800/60 hover:text-white transition-all border border-dashed border-slate-800 hover:border-slate-700 mt-1"
+              >
+                <div className="flex items-center gap-3">
+                  <Settings className="w-4 h-4 text-blue-400 shrink-0" />
+                  <span>Sistem & Yedekleme</span>
+                </div>
+                <span className="text-[10px] bg-blue-500/10 text-blue-400 border border-blue-500/20 px-1.5 py-0.5 rounded font-mono">
+                  AYARLAR
                 </span>
               </button>
             )}

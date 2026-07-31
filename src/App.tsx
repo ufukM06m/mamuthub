@@ -31,7 +31,7 @@ import {
 import { Presentation, Category, Client, ViewMode, User, ViewAnalyticsLog, ClientFeedback, AuditLog } from './types';
 import { generatePresentationPDF } from './utils/pdfExport';
 import { FileText, Plus, LayoutGrid, List, Folders, Briefcase } from 'lucide-react';
-import { subscribeToCollection, upsertItem, removeItem, replaceCollection, savePresentationAssets, loadPresentationAssets } from './lib/firestoreService';
+import { subscribeToCollection, upsertItem, removeItem, replaceCollection, savePresentationAssets, loadPresentationAssets, clearPresentationAssetCache } from './lib/firestoreService';
 import { deletePresentationFromStorage } from './lib/firebaseStorageService';
 import { 
   saveLocalPresentation, 
@@ -40,8 +40,12 @@ import {
   sanitizePresentationForFirestore,
   getDeletedPresIds,
   addDeletedPresId,
-  clearDeletedPresIds
+  clearDeletedPresIds,
+  getFavoritePresIds,
+  saveFavoritePresIds,
+  toggleFavoritePresId
 } from './lib/storageService';
+import { purgeAllPresentationsSystemWide } from './lib/clearAllData';
 
 interface TaxonomyDoc {
   id: string;
@@ -102,8 +106,24 @@ export default function App() {
   }, [currentUser]);
 
   const [presentations, setPresentations] = useState<Presentation[]>([]);
-  const [categories, setCategories] = useState<Category[]>(initialCategories);
+  const [categories, setCategories] = useState<Category[]>(() => {
+    try {
+      const saved = localStorage.getItem('mamuthub_categories');
+      return saved ? JSON.parse(saved) : initialCategories;
+    } catch {
+      return initialCategories;
+    }
+  });
   const [clients, setClients] = useState<Client[]>(initialClients);
+
+  // Sync categories state changes to localStorage
+  useEffect(() => {
+    try {
+      localStorage.setItem('mamuthub_categories', JSON.stringify(categories));
+    } catch {
+      // ignore
+    }
+  }, [categories]);
 
   // New modules state
   const [analyticsLogs, setAnalyticsLogs] = useState<ViewAnalyticsLog[]>(initialAnalyticsLogs);
@@ -130,8 +150,21 @@ export default function App() {
 
   // Load IndexedDB presentations on startup to preserve large PDF data URLs and images
   useEffect(() => {
+    // Check if initial system-wide wipe has been performed
+    const isWiped = localStorage.getItem('mamuthub_clean_slate_v5');
+    if (!isWiped) {
+      purgeAllPresentationsSystemWide().then(() => {
+        localStorage.setItem('mamuthub_clean_slate_v5', 'true');
+        setPresentations([]);
+        setActiveStudioPresentationState(null);
+        sessionStorage.removeItem('mamuthub_active_pres_id');
+      });
+      return;
+    }
+
     getLocalPresentations<Presentation>().then((localPres) => {
       const deletedIds = getDeletedPresIds();
+      const favIds = getFavoritePresIds();
       const mockIds = ['pres-1', 'pres-2', 'pres-3', 'pres-4'];
       if (localPres && localPres.length > 0) {
         setPresentations((prev) => {
@@ -142,15 +175,17 @@ export default function App() {
           localPres.forEach((lp) => {
             if (deletedIds.includes(lp.id) || mockIds.includes(lp.id)) return;
             const existing = map.get(lp.id);
+            const isFav = favIds.includes(lp.id) || !!lp.isFavorite;
             if (existing) {
               map.set(lp.id, {
                 ...existing,
                 ...lp,
+                isFavorite: isFav,
                 extractedImages: lp.extractedImages || existing.extractedImages,
                 pdfUrl: lp.pdfUrl || existing.pdfUrl,
               });
             } else {
-              map.set(lp.id, lp);
+              map.set(lp.id, { ...lp, isFavorite: isFav });
             }
           });
           return Array.from(map.values());
@@ -164,6 +199,7 @@ export default function App() {
     const unsubPres = subscribeToCollection<Presentation>('presentations', [], (firestorePres) => {
       getLocalPresentations<Presentation>().then(async (localPres) => {
         const deletedIds = getDeletedPresIds();
+        const favIds = getFavoritePresIds();
         const mockIds = ['pres-1', 'pres-2', 'pres-3', 'pres-4'];
         const map = new Map<string, Presentation>();
 
@@ -172,7 +208,10 @@ export default function App() {
 
         // 1. First add local user presentations from IndexedDB (they hold complete binary PDF data and local edits)
         validLocal.forEach((lp) => {
-          map.set(lp.id, lp);
+          map.set(lp.id, {
+            ...lp,
+            isFavorite: favIds.includes(lp.id) || !!lp.isFavorite,
+          });
         });
 
         // 2. Merge Firestore documents (ensuring local edits and local PDF/images override Firestore sanitized data)
@@ -196,10 +235,13 @@ export default function App() {
               }
             }
 
+            const isFav = favIds.includes(fp.id) || (lp ? !!lp.isFavorite : !!fp.isFavorite);
+
             if (lp) {
               const merged = {
                 ...fp,
                 ...lp, // local user edits take priority
+                isFavorite: isFav,
                 pdfUrl: lp.pdfUrl || fp.pdfUrl,
                 extractedImages:
                   lp.extractedImages && lp.extractedImages.length > 0
@@ -209,8 +251,9 @@ export default function App() {
               map.set(fp.id, merged);
               saveLocalPresentation(merged).catch(() => {});
             } else {
-              map.set(fp.id, fp);
-              saveLocalPresentation(fp).catch(() => {});
+              const merged = { ...fp, isFavorite: isFav };
+              map.set(fp.id, merged);
+              saveLocalPresentation(merged).catch(() => {});
             }
           })
         );
@@ -247,8 +290,13 @@ export default function App() {
     });
 
     const unsubCats = subscribeToCollection<Category>('categories', [], (cats) => {
-      if (cats && cats.length > 0) {
+      if (Array.isArray(cats)) {
         setCategories(cats);
+        try {
+          localStorage.setItem('mamuthub_categories', JSON.stringify(cats));
+        } catch {
+          // ignore
+        }
       }
     });
     const unsubCli = subscribeToCollection<Client>('clients', [], (clis) => {
@@ -473,11 +521,12 @@ export default function App() {
 
   // Handlers
   const handleToggleFavorite = async (id: string) => {
+    const isFavNow = toggleFavoritePresId(id);
     let targetItem: Presentation | null = null;
     setPresentations((prev) => {
       const updated = prev.map((p) => {
         if (p.id === id) {
-          const item = { ...p, isFavorite: !p.isFavorite };
+          const item = { ...p, isFavorite: isFavNow };
           targetItem = item;
           saveLocalPresentation(item);
           return item;
@@ -495,6 +544,7 @@ export default function App() {
   const handleDeletePresentation = async (id: string) => {
     if (window.confirm('Bu sunumu silmek istediğinizden emin misiniz?')) {
       addDeletedPresId(id);
+      clearPresentationAssetCache(id);
       setPresentations((prev) => prev.filter((p) => p.id !== id));
       await deleteLocalPresentation(id);
       await removeItem('presentations', id);
@@ -562,7 +612,13 @@ export default function App() {
       slug: formatted.toLowerCase().replace(/\s+/g, '-'),
       count: 0,
     };
-    setCategories([...categories, newCat]);
+    const updated = [...categories, newCat];
+    setCategories(updated);
+    try {
+      localStorage.setItem('mamuthub_categories', JSON.stringify(updated));
+    } catch {
+      // ignore
+    }
     upsertItem('categories', newCat);
   };
 
@@ -702,13 +758,22 @@ export default function App() {
   const handleDeleteCategory = (catName: string) => {
     const foundCat = categories.find((c) => c.name === catName);
     if (foundCat) removeItem('categories', foundCat.id);
-    setCategories((prev) => prev.filter((c) => c.name !== catName));
 
-    // Move presentations to GENEL SUNUMLAR
+    const updatedCategories = categories.filter((c) => c.name !== catName);
+    setCategories(updatedCategories);
+    try {
+      localStorage.setItem('mamuthub_categories', JSON.stringify(updatedCategories));
+    } catch {
+      // ignore
+    }
+
+    const fallbackCat = updatedCategories[0]?.name || 'GENEL SUNUMLAR';
+
+    // Move presentations to fallback category
     setPresentations((prev) => {
       const updated = prev.map((p) => {
         if (p.category === catName) {
-          const item = { ...p, category: 'GENEL SUNUMLAR' };
+          const item = { ...p, category: fallbackCat };
           saveLocalPresentation(item);
           sanitizePresentationForFirestore(item).then((s) => upsertItem('presentations', s));
           return item;
@@ -811,14 +876,13 @@ export default function App() {
   };
 
   const handlePurgeTestData = async () => {
-    if (window.confirm('Veritabanındaki ve önbellekteki tüm varsayılan örnek/test sunumları silinsin mi? Yalnızca sizin eklediğiniz gerçek sunumlar kalacaktır.')) {
-      const mockIds = ['pres-1', 'pres-2', 'pres-3', 'pres-4'];
-      mockIds.forEach((id) => addDeletedPresId(id));
-      setPresentations((prev) => prev.filter((p) => !mockIds.includes(p.id)));
-      for (const id of mockIds) {
-        await deleteLocalPresentation(id);
-        await removeItem('presentations', id);
-      }
+    if (window.confirm('TÜM SUNUM VERİLERİ SİLİNSİN Mİ? Veritabanı (Firestore), yerel depolama (IndexedDB) ve Bulut Depolamadaki (Firebase Storage) tüm sunumlar kalıcı olarak silinecektir.')) {
+      setPresentations([]);
+      setActiveStudioPresentationState(null);
+      sessionStorage.removeItem('mamuthub_active_pres_id');
+      await purgeAllPresentationsSystemWide();
+      localStorage.setItem('mamuthub_clean_slate_v5', 'true');
+      alert('Tüm sunum veritabanı, yerel önbellek ve bulut depolama başarıyla temizlendi! En baştan temiz yüklemeye başlayabilirsiniz.');
     }
   };
 
@@ -984,6 +1048,7 @@ export default function App() {
         onSelectCategory={setSelectedCategory}
         onOpenAddCategory={() => setIsManageCategoriesOpen(true)}
         onOpenManageTaxonomy={() => setIsManageTaxonomyOpen(true)}
+        onOpenBackupModal={() => setIsBackupModalOpen(true)}
         totalPresentationsCount={presentations.length}
         favoritesCount={favoritesCount}
         unreadFeedbacksCount={unreadFeedbacksCount}
@@ -1208,6 +1273,7 @@ export default function App() {
         <BackupModal
           onClose={() => setIsBackupModalOpen(false)}
           onRestoreData={handleRestoreData}
+          onExportData={handleExportBackup}
           onPurgeTestData={handlePurgeTestData}
         />
       )}

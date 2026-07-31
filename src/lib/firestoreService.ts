@@ -128,7 +128,26 @@ export async function replaceCollection<T extends { id: string }>(
   }
 }
 
+export async function purgeAllFirestorePresentations(): Promise<void> {
+  if (isFirestoreQuotaExceeded) return;
+  try {
+    const presSnap = await getDocs(collection(db, 'presentations'));
+    await Promise.all(presSnap.docs.map((d) => deleteDoc(d.ref).catch(() => {})));
+
+    const assetsSnap = await getDocs(collection(db, 'presentation_assets'));
+    await Promise.all(assetsSnap.docs.map((d) => deleteDoc(d.ref).catch(() => {})));
+
+    assetMemoryCache.clear();
+  } catch (err) {
+    console.warn('Error purging firestore presentations:', err);
+  }
+}
+
 const assetMemoryCache = new Map<string, { pdfUrl?: string; extractedImages?: string[] }>();
+
+export function clearPresentationAssetCache(presId: string): void {
+  assetMemoryCache.delete(presId);
+}
 
 // Save large presentation assets (base64 PDF data & slide images) to separate Firestore sub-documents
 export async function savePresentationAssets(presId: string, pdfUrl?: string, extractedImages?: string[]): Promise<void> {
