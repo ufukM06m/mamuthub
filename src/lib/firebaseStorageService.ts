@@ -1,6 +1,15 @@
 import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 import { storage } from './firebase';
 
+function withTimeout<T>(promise: Promise<T>, ms: number = 8000): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error(`Storage operation timed out after ${ms}ms`)), ms)
+    ),
+  ]);
+}
+
 /**
  * Converts a base64 Data URL (e.g., data:application/pdf;base64,...) to a Blob
  */
@@ -40,10 +49,13 @@ export async function uploadPdfToStorage(
     }
 
     const storageRef = ref(storage, `presentations/${presId}/document.pdf`);
-    const snapshot = await uploadBytes(storageRef, blob, {
-      contentType: 'application/pdf',
-      customMetadata: { presentationId: presId },
-    });
+    const snapshot = await withTimeout(
+      uploadBytes(storageRef, blob, {
+        contentType: 'application/pdf',
+        customMetadata: { presentationId: presId },
+      }),
+      10000
+    );
 
     const downloadUrl = await getDownloadURL(snapshot.ref);
     return downloadUrl;
@@ -69,10 +81,13 @@ export async function uploadThumbnailToStorage(
 
     const blob = dataUrlToBlob(thumbnailUrl);
     const storageRef = ref(storage, `presentations/${presId}/thumbnail.jpg`);
-    const snapshot = await uploadBytes(storageRef, blob, {
-      contentType: 'image/jpeg',
-      customMetadata: { presentationId: presId },
-    });
+    const snapshot = await withTimeout(
+      uploadBytes(storageRef, blob, {
+        contentType: 'image/jpeg',
+        customMetadata: { presentationId: presId },
+      }),
+      8000
+    );
 
     return await getDownloadURL(snapshot.ref);
   } catch (error) {
@@ -94,35 +109,48 @@ export async function uploadSlideImagesToStorage(
     return [];
   }
 
-  const downloadUrls: string[] = [];
+  const downloadUrls: string[] = new Array(images.length);
   try {
-    let completedCount = 0;
+    const tasks: Array<() => Promise<void>> = [];
+
     for (let i = 0; i < images.length; i++) {
       const img = images[i];
       if (typeof img === 'string' && (img.startsWith('https://') || img.startsWith('http://'))) {
-        downloadUrls.push(img);
+        downloadUrls[i] = img;
       } else if (typeof img === 'string' && img.startsWith('data:image/')) {
-        const blob = dataUrlToBlob(img);
-        const fileRef = ref(storage, `presentations/${presId}/slides/slide_${i + 1}.jpg`);
-        const snapshot = await uploadBytes(fileRef, blob, {
-          contentType: 'image/jpeg',
-          customMetadata: { presentationId: presId, slideNumber: String(i + 1) },
+        tasks.push(async () => {
+          try {
+            const blob = dataUrlToBlob(img);
+            const fileRef = ref(storage, `presentations/${presId}/slides/slide_${i + 1}.jpg`);
+            const snapshot = await withTimeout(
+              uploadBytes(fileRef, blob, {
+                contentType: 'image/jpeg',
+                customMetadata: { presentationId: presId, slideNumber: String(i + 1) },
+              }),
+              8000
+            );
+            downloadUrls[i] = await getDownloadURL(snapshot.ref);
+          } catch {
+            downloadUrls[i] = img; // Fallback to base64 if storage upload fails or times out
+          }
         });
-        const url = await getDownloadURL(snapshot.ref);
-        downloadUrls.push(url);
       } else {
-        downloadUrls.push(img);
+        downloadUrls[i] = img;
       }
+    }
 
-      completedCount++;
+    const BATCH_SIZE = 5;
+    for (let i = 0; i < tasks.length; i += BATCH_SIZE) {
+      const batch = tasks.slice(i, i + BATCH_SIZE);
+      await Promise.all(batch.map((fn) => fn()));
       if (onProgress) {
-        onProgress(completedCount, images.length);
+        onProgress(Math.min(i + BATCH_SIZE, tasks.length), tasks.length);
       }
     }
     return downloadUrls;
   } catch (error) {
     console.warn('Firebase Storage slayt görselleri yükleme uyarısı:', error);
-    return downloadUrls.length > 0 ? downloadUrls : null;
+    return downloadUrls;
   }
 }
 

@@ -516,9 +516,16 @@ export default function App() {
     setPresentations((prev) => [timeStamped, ...prev.filter((p) => p.id !== timeStamped.id)]);
     setActiveStudioPresentation(timeStamped);
     await saveLocalPresentation(timeStamped);
-    await savePresentationAssets(timeStamped.id, timeStamped.pdfUrl, timeStamped.extractedImages);
-    const sanitized = await sanitizePresentationForFirestore(timeStamped);
-    await upsertItem('presentations', sanitized);
+
+    // Asynchronously sync to Firestore & Cloud Storage in background without blocking modal close
+    (async () => {
+      try {
+        const sanitized = await sanitizePresentationForFirestore(timeStamped);
+        await upsertItem('presentations', sanitized);
+      } catch (err) {
+        console.warn('Background presentation upload warning:', err);
+      }
+    })();
   };
 
   const handleSavePresentation = async (updated: Presentation) => {
@@ -531,9 +538,16 @@ export default function App() {
       setActiveStudioPresentationState(timeStamped);
     }
     await saveLocalPresentation(timeStamped);
-    await savePresentationAssets(timeStamped.id, timeStamped.pdfUrl, timeStamped.extractedImages);
-    const sanitized = await sanitizePresentationForFirestore(timeStamped);
-    await upsertItem('presentations', sanitized);
+
+    // Asynchronously sync to Firestore & Cloud Storage
+    (async () => {
+      try {
+        const sanitized = await sanitizePresentationForFirestore(timeStamped);
+        await upsertItem('presentations', sanitized);
+      } catch (err) {
+        console.warn('Background presentation save warning:', err);
+      }
+    })();
   };
 
   // Category Handlers

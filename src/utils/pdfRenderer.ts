@@ -44,7 +44,10 @@ export async function convertPdfToImages(
 
     for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
       const page = await pdfDocument.getPage(pageNum);
-      const viewport = page.getViewport({ scale });
+      // Calculate optimal scale so max canvas width is up to 2560px (2K Ultra-Sharp) for crystal clear vector text & graphics
+      const unscaledViewport = page.getViewport({ scale: 1.0 });
+      const targetScale = Math.min(2.5, Math.max(1.5, 2560 / unscaledViewport.width));
+      const viewport = page.getViewport({ scale: targetScale });
 
       const canvas = document.createElement('canvas');
       const context = canvas.getContext('2d', { alpha: false });
@@ -66,8 +69,8 @@ export async function convertPdfToImages(
         };
 
         await page.render(renderContext).promise;
-        // Use high-quality JPEG (0.98) or PNG for crystal clear text & graphics
-        const imageUrl = canvas.toDataURL('image/jpeg', 0.88);
+        // High-fidelity JPEG (0.92) - visually indistinguishable from native PDF vectors on 2K/4K displays
+        const imageUrl = canvas.toDataURL('image/jpeg', 0.92);
         images.push(imageUrl);
       }
     }

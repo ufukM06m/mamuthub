@@ -58,7 +58,7 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
 
     setIsLoading(true);
 
-    convertPdfToImages(pdfUrl, 50, 3.0)
+    convertPdfToImages(pdfUrl, 50, 1.8)
       .then((res) => {
         if (isMounted) {
           if (res.images && res.images.length > 0) {

@@ -77,7 +77,7 @@ export const PresenterModeModal: React.FC<PresenterModeModalProps> = ({
     }
 
     setIsLoadingImages(true);
-    convertPdfToImages(presentation.pdfUrl, 50, 3.0)
+    convertPdfToImages(presentation.pdfUrl, 50, 1.8)
       .then((res) => {
         if (isMounted) {
           if (res.images && res.images.length > 0) {

@@ -73,7 +73,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         } lg:static`}
       >
         {/* Top Section */}
-        <div className="flex flex-col flex-1 overflow-y-auto">
+        <div className="flex flex-col flex-1 overflow-y-auto no-scrollbar">
           {/* Logo / Header */}
           <div className="p-4 border-b border-slate-800/60 flex items-center justify-between">
             <div className="flex items-center gap-3">

@@ -78,8 +78,8 @@ export const UploadPdfModal: React.FC<UploadPdfModalProps> = ({
         setPdfDataUrl(dataUrl);
 
         try {
-          // Process PDF pages to images in Ultra-HD 3.0 scale
-          const result = await convertPdfToImages(file, 50, 3.0);
+          // Process PDF pages to images in 2K Ultra-Sharp resolution
+          const result = await convertPdfToImages(file, 50, 2.2);
           if (result.images && result.images.length > 0) {
             setExtractedImages(result.images);
             setPageCount(result.pageCount);
@@ -219,14 +219,22 @@ export const UploadPdfModal: React.FC<UploadPdfModalProps> = ({
               className="absolute inset-0 opacity-0 cursor-pointer"
             />
 
-            {selectedFile ? (
+            {isProcessingPdf ? (
+              <div className="space-y-2">
+                <div className="w-12 h-12 rounded-full bg-blue-500/20 text-blue-400 flex items-center justify-center mx-auto">
+                  <Loader2 className="w-6 h-6 animate-spin text-blue-400" />
+                </div>
+                <p className="text-sm font-bold text-white">PDF Sayfaları Slaytlara İşleniyor...</p>
+                <p className="text-xs text-slate-400">Lütfen bekleyin ({fileSizeStr})</p>
+              </div>
+            ) : selectedFile ? (
               <div className="space-y-2">
                 <div className="w-12 h-12 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center mx-auto">
                   <CheckCircle2 className="w-6 h-6" />
                 </div>
                 <p className="text-sm font-bold text-white">{selectedFile.name}</p>
                 <p className="text-xs text-slate-400">
-                  {fileSizeStr} &bull; PDF Belgesi Hazır
+                  {fileSizeStr} &bull; {extractedImages.length > 0 ? `${extractedImages.length} Slayt Hazır` : 'PDF Belgesi Hazır'}
                 </p>
                 <span className="inline-block mt-1 text-[11px] text-blue-400 underline font-semibold">
                   Farklı PDF Dosyası Seç
@@ -523,6 +531,11 @@ export const UploadPdfModal: React.FC<UploadPdfModalProps> = ({
                 <>
                   <Loader2 className="w-4 h-4 animate-spin text-blue-200" />
                   <span>Veritabanına Kaydediliyor...</span>
+                </>
+              ) : isProcessingPdf ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin text-blue-200" />
+                  <span>PDF Slaytları İşleniyor...</span>
                 </>
               ) : (
                 <>
