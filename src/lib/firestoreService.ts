@@ -22,7 +22,7 @@ function checkQuotaError(err: any) {
   ) {
     if (!isFirestoreQuotaExceeded) {
       isFirestoreQuotaExceeded = true;
-      console.warn('Firestore write/read quota exceeded for today. Falling back 100% to local IndexedDB storage.');
+      console.info('ℹ️ Firestore günlük ücretsiz okuma/yazma kotası doldu. Sistem otomatik olarak %100 yerel IndexedDB depolama modunda kesintisiz çalışıyor.');
     }
     return true;
   }
@@ -57,7 +57,9 @@ export function subscribeToCollection<T extends { id: string }>(
     },
     (error) => {
       const isQuota = checkQuotaError(error);
-      console.warn(`Firestore subscription warning [${collectionName}]:`, error?.message || error);
+      if (!isQuota) {
+        console.warn(`Firestore subscription warning [${collectionName}]:`, error?.message || error);
+      }
       if (isQuota && !unsubscribing) {
         unsubscribing = true;
         try {

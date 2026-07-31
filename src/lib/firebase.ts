@@ -13,8 +13,8 @@ export const db = firebaseConfig.firestoreDatabaseId
 export const auth = getAuth(app);
 export const storage = getStorage(app);
 
-// Authenticate anonymously so Firebase Storage & Firestore rules work without errors
-signInAnonymously(auth).catch((err) => {
-  console.warn('Firebase anonymous auth warning:', err);
+// Authenticate anonymously if enabled; gracefully handle restricted operation
+signInAnonymously(auth).catch(() => {
+  // Anonymous auth disabled or restricted; non-fatal for local operation
 });
 

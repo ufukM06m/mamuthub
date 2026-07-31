@@ -1,6 +1,6 @@
 import { purgeAllFirestorePresentations } from './firestoreService';
 import { getDocs, collection } from 'firebase/firestore';
-import { purgeAllLocalPresentations, getLocalPresentations } from './storageService';
+import { purgeAllLocalPresentations, getLocalPresentations, addDeletedPresId } from './storageService';
 import { deletePresentationFromStorage } from './firebaseStorageService';
 import { db } from './firebase';
 
@@ -21,13 +21,16 @@ export async function purgeAllPresentationsSystemWide(): Promise<void> {
 
     const allIds = Array.from(new Set([...localIds, ...firestoreIds, 'pres-1', 'pres-2', 'pres-3', 'pres-4']));
 
-    // 3. Delete files from Firebase Storage
+    // 3. Mark all as deleted so local state/subscribers immediately filter them out
+    allIds.forEach((id) => addDeletedPresId(id));
+
+    // 4. Delete files from Firebase Storage
     await Promise.all(allIds.map((id) => deletePresentationFromStorage(id, 50))).catch(() => {});
 
-    // 4. Delete Firestore documents & presentation_assets
+    // 5. Delete Firestore documents & presentation_assets
     await purgeAllFirestorePresentations().catch(() => {});
 
-    // 5. Delete IndexedDB & LocalStorage records
+    // 6. Delete IndexedDB & LocalStorage records
     await purgeAllLocalPresentations().catch(() => {});
 
     console.log('Tüm sunum verileri (IndexedDB, LocalStorage, Firestore, Storage) başarıyla temizlendi.');

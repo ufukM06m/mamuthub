@@ -189,16 +189,19 @@ export async function deleteLocalPresentation(id: string): Promise<void> {
 export async function purgeAllLocalPresentations(): Promise<void> {
   try {
     const db = await openDB();
-    const tx = db.transaction(PRESENTATIONS_STORE, 'readwrite');
-    const store = tx.objectStore(PRESENTATIONS_STORE);
-    store.clear();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(PRESENTATIONS_STORE, 'readwrite');
+      const store = tx.objectStore(PRESENTATIONS_STORE);
+      const req = store.clear();
+      req.onsuccess = () => resolve();
+      req.onerror = () => reject(req.error);
+    });
   } catch (err) {
     console.warn('Failed to clear IndexedDB presentations:', err);
   }
 
   try {
     localStorage.removeItem('mamuthub_local_presentations');
-    localStorage.removeItem('mamuthub_deleted_pres_ids');
     localStorage.removeItem('mamuthub_favorites');
   } catch {
     // ignore

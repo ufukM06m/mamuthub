@@ -151,10 +151,10 @@ export default function App() {
   // Load IndexedDB presentations on startup to preserve large PDF data URLs and images
   useEffect(() => {
     // Check if initial system-wide wipe has been performed
-    const isWiped = localStorage.getItem('mamuthub_clean_slate_v5');
+    const isWiped = localStorage.getItem('mamuthub_clean_slate_v6');
     if (!isWiped) {
       purgeAllPresentationsSystemWide().then(() => {
-        localStorage.setItem('mamuthub_clean_slate_v5', 'true');
+        localStorage.setItem('mamuthub_clean_slate_v6', 'true');
         setPresentations([]);
         setActiveStudioPresentationState(null);
         sessionStorage.removeItem('mamuthub_active_pres_id');
@@ -881,7 +881,7 @@ export default function App() {
       setActiveStudioPresentationState(null);
       sessionStorage.removeItem('mamuthub_active_pres_id');
       await purgeAllPresentationsSystemWide();
-      localStorage.setItem('mamuthub_clean_slate_v5', 'true');
+      localStorage.setItem('mamuthub_clean_slate_v6', 'true');
       alert('Tüm sunum veritabanı, yerel önbellek ve bulut depolama başarıyla temizlendi! En baştan temiz yüklemeye başlayabilirsiniz.');
     }
   };
