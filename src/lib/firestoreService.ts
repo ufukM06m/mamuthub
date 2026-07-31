@@ -13,8 +13,19 @@ import {
 import { db } from './firebase';
 
 let isFirestoreQuotaExceeded = false;
+type QuotaListener = (isQuota: boolean) => void;
+const quotaListeners = new Set<QuotaListener>();
 
-function checkQuotaError(err: any) {
+export function getIsQuotaExceeded(): boolean {
+  return isFirestoreQuotaExceeded;
+}
+
+export function onQuotaExceededChange(listener: QuotaListener): () => void {
+  quotaListeners.add(listener);
+  return () => quotaListeners.delete(listener);
+}
+
+function checkQuotaError(err: any): boolean {
   if (
     err?.code === 'resource-exhausted' ||
     err?.message?.includes('Quota limit exceeded') ||
@@ -22,6 +33,7 @@ function checkQuotaError(err: any) {
   ) {
     if (!isFirestoreQuotaExceeded) {
       isFirestoreQuotaExceeded = true;
+      quotaListeners.forEach((l) => l(true));
       console.info('ℹ️ Firestore günlük ücretsiz okuma/yazma kotası doldu. Sistem otomatik olarak %100 yerel IndexedDB depolama modunda kesintisiz çalışıyor.');
     }
     return true;
@@ -85,15 +97,17 @@ export function subscribeToCollection<T extends { id: string }>(
 export async function upsertItem<T extends { id: string }>(
   collectionName: string,
   item: T
-) {
-  if (isFirestoreQuotaExceeded) return;
+): Promise<{ success: boolean; isQuota: boolean }> {
+  if (isFirestoreQuotaExceeded) return { success: false, isQuota: true };
   try {
     const docRef = doc(db, collectionName, item.id);
     const cleanItem = JSON.parse(JSON.stringify(item));
     await setDoc(docRef, cleanItem, { merge: true });
+    return { success: true, isQuota: false };
   } catch (err) {
-    checkQuotaError(err);
+    const isQuota = checkQuotaError(err);
     console.warn(`Error saving item to ${collectionName}:`, err);
+    return { success: false, isQuota };
   }
 }
 

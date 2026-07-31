@@ -1,6 +1,7 @@
-import React from 'react';
-import { Search, Download, Upload, Plus, Menu, UserCheck } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Search, Download, Upload, Plus, Menu, AlertTriangle } from 'lucide-react';
 import { User } from '../types';
+import { getIsQuotaExceeded, onQuotaExceededChange } from '../lib/firestoreService';
 
 interface HeaderProps {
   searchQuery: string;
@@ -21,6 +22,13 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenMobileMenu,
   currentUser,
 }) => {
+  const [isQuotaExceeded, setIsQuotaExceeded] = useState(() => getIsQuotaExceeded());
+
+  useEffect(() => {
+    return onQuotaExceededChange((status) => {
+      setIsQuotaExceeded(status);
+    });
+  }, []);
   return (
     <header className="h-16 border-b border-slate-800/80 bg-[#0d1424]/80 backdrop-blur-md px-3 sm:px-6 flex items-center justify-between gap-2 sm:gap-4 sticky top-0 z-20">
       <div className="flex items-center gap-2 flex-1 max-w-xl min-w-0">
@@ -50,6 +58,17 @@ export const Header: React.FC<HeaderProps> = ({
 
       {/* Action Buttons */}
       <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
+        {/* Quota Exceeded Indicator Badge */}
+        {isQuotaExceeded && (
+          <div
+            title="Firestore bulut kotası dolduğu için yeni yüklemeler canlı veritabanına aktarılamıyor, yalnızca bu cihazda saklanıyor."
+            className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-amber-500/15 border border-amber-500/40 text-amber-300 text-xs font-semibold animate-pulse"
+          >
+            <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+            <span>Bulut Kotası Dolu (Yerel Mod)</span>
+          </div>
+        )}
+
         {/* Current User Badge (Desktop) */}
         {currentUser && (
           <div className="hidden lg:flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-slate-900/90 border border-slate-800 text-xs">

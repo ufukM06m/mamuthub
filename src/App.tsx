@@ -31,8 +31,9 @@ import {
 import { Presentation, Category, Client, ViewMode, User, ViewAnalyticsLog, ClientFeedback, AuditLog } from './types';
 import { generatePresentationPDF } from './utils/pdfExport';
 import { FileText, Plus, LayoutGrid, List, Folders, Briefcase } from 'lucide-react';
-import { subscribeToCollection, upsertItem, removeItem, replaceCollection, savePresentationAssets, loadPresentationAssets, clearPresentationAssetCache } from './lib/firestoreService';
+import { subscribeToCollection, upsertItem, removeItem, replaceCollection, savePresentationAssets, loadPresentationAssets, clearPresentationAssetCache, getIsQuotaExceeded } from './lib/firestoreService';
 import { deletePresentationFromStorage } from './lib/firebaseStorageService';
+import { ToastContainer, ToastMessage } from './components/Toast';
 import { 
   saveLocalPresentation, 
   getLocalPresentations, 
@@ -54,6 +55,18 @@ interface TaxonomyDoc {
 }
 
 export default function App() {
+  // Toast notifications state
+  const [toasts, setToasts] = useState<ToastMessage[]>([]);
+
+  const showToast = (message: string, type: 'warning' | 'success' | 'error' | 'info' = 'info') => {
+    const id = `toast-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+    setToasts((prev) => [...prev.slice(-3), { id, message, type }]);
+  };
+
+  const dismissToast = (id: string) => {
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+  };
+
   // Users & Auth State
   const [users, setUsers] = useState<User[]>(() => {
     try {
@@ -150,18 +163,6 @@ export default function App() {
 
   // Load IndexedDB presentations on startup to preserve large PDF data URLs and images
   useEffect(() => {
-    // Check if initial system-wide wipe has been performed
-    const isWiped = localStorage.getItem('mamuthub_clean_slate_v6');
-    if (!isWiped) {
-      purgeAllPresentationsSystemWide().then(() => {
-        localStorage.setItem('mamuthub_clean_slate_v6', 'true');
-        setPresentations([]);
-        setActiveStudioPresentationState(null);
-        sessionStorage.removeItem('mamuthub_active_pres_id');
-      });
-      return;
-    }
-
     getLocalPresentations<Presentation>().then((localPres) => {
       const deletedIds = getDeletedPresIds();
       const favIds = getFavoritePresIds();
@@ -290,7 +291,7 @@ export default function App() {
     });
 
     const unsubCats = subscribeToCollection<Category>('categories', [], (cats) => {
-      if (Array.isArray(cats)) {
+      if (Array.isArray(cats) && cats.length > 0) {
         setCategories(cats);
         try {
           localStorage.setItem('mamuthub_categories', JSON.stringify(cats));
@@ -570,10 +571,29 @@ export default function App() {
     // Asynchronously sync to Firestore & Cloud Storage in background without blocking modal close
     (async () => {
       try {
+        if (getIsQuotaExceeded()) {
+          showToast(
+            '⚠️ Bulut kotası dolduğu için bu yükleme yalnızca bu cihazda saklandı, canlı veritabanına aktarılamadı.',
+            'warning'
+          );
+          return;
+        }
         const sanitized = await sanitizePresentationForFirestore(timeStamped);
-        await upsertItem('presentations', sanitized);
+        const result = await upsertItem('presentations', sanitized);
+        if (!result.success || result.isQuota) {
+          showToast(
+            '⚠️ Bulut kotası dolduğu için bu yükleme yalnızca bu cihazda saklandı, canlı veritabanına aktarılamadı.',
+            'warning'
+          );
+        } else {
+          showToast('✅ Sunum başarıyla canlı veritabanına ve bulut depolamaya aktarıldı.', 'success');
+        }
       } catch (err) {
         console.warn('Background presentation upload warning:', err);
+        showToast(
+          '⚠️ Bulut kotası dolduğu için bu yükleme yalnızca bu cihazda saklandı, canlı veritabanına aktarılamadı.',
+          'warning'
+        );
       }
     })();
   };
@@ -592,16 +612,35 @@ export default function App() {
     // Asynchronously sync to Firestore & Cloud Storage
     (async () => {
       try {
+        if (getIsQuotaExceeded()) {
+          showToast(
+            '⚠️ Bulut kotası dolduğu için bu değişiklik yalnızca bu cihazda saklandı, canlı veritabanına aktarılamadı.',
+            'warning'
+          );
+          return;
+        }
         const sanitized = await sanitizePresentationForFirestore(timeStamped);
-        await upsertItem('presentations', sanitized);
+        const result = await upsertItem('presentations', sanitized);
+        if (!result.success || result.isQuota) {
+          showToast(
+            '⚠️ Bulut kotası dolduğu için bu değişiklik yalnızca bu cihazda saklandı, canlı veritabanına aktarılamadı.',
+            'warning'
+          );
+        } else {
+          showToast('✅ Sunum güncellemeleri canlı veritabanına kaydedildi.', 'success');
+        }
       } catch (err) {
         console.warn('Background presentation save warning:', err);
+        showToast(
+          '⚠️ Bulut kotası dolduğu için bu değişiklik yalnızca bu cihazda saklandı, canlı veritabanına aktarılamadı.',
+          'warning'
+        );
       }
     })();
   };
 
   // Category Handlers
-  const handleAddCategory = (categoryName: string) => {
+  const handleAddCategory = async (categoryName: string) => {
     const formatted = categoryName.trim().toUpperCase();
     const exists = categories.some((c) => c.name.toLowerCase() === formatted.toLowerCase());
     if (exists) return;
@@ -619,7 +658,12 @@ export default function App() {
     } catch {
       // ignore
     }
-    upsertItem('categories', newCat);
+    const result = await upsertItem('categories', newCat);
+    if (!result.success || result.isQuota) {
+      showToast('⚠️ Bulut kotası dolduğu için yeni kategori yalnızca bu cihazda saklandı.', 'warning');
+    } else {
+      showToast('✅ Kategori başarıyla canlı veritabanına kaydedildi.', 'success');
+    }
   };
 
   // Taxonomy Handlers for Fields & Target Audiences
@@ -881,7 +925,6 @@ export default function App() {
       setActiveStudioPresentationState(null);
       sessionStorage.removeItem('mamuthub_active_pres_id');
       await purgeAllPresentationsSystemWide();
-      localStorage.setItem('mamuthub_clean_slate_v6', 'true');
       alert('Tüm sunum veritabanı, yerel önbellek ve bulut depolama başarıyla temizlendi! En baştan temiz yüklemeye başlayabilirsiniz.');
     }
   };
@@ -1290,6 +1333,9 @@ export default function App() {
           onAddTargetAudience={handleAddTargetAudience}
         />
       )}
+
+      {/* Toast Notifications */}
+      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </div>
   );
 }
