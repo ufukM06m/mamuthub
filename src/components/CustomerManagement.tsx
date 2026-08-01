@@ -22,7 +22,7 @@ import {
   Upload,
   Image as ImageIcon
 } from 'lucide-react';
-import { Client, Presentation } from '../types';
+import { Client, Presentation, ShareToken, ViewAnalyticsLog } from '../types';
 import { generatePresentationPDF } from '../utils/pdfExport';
 import { AssignPresentationsModal } from './AssignPresentationsModal';
 import { ShareLinkModal } from './ShareLinkModal';
@@ -68,6 +68,10 @@ export const ClientAvatar: React.FC<{ logoUrl?: string; companyName: string; siz
 interface CustomerManagementProps {
   clients: Client[];
   presentations: Presentation[];
+  shareTokens?: ShareToken[];
+  onCreateShareToken?: (token: Omit<ShareToken, 'id' | 'createdAt' | 'viewCount'>) => Promise<ShareToken> | ShareToken;
+  onDeleteShareToken?: (tokenId: string) => void;
+  onLogAnalytics?: (log: Omit<ViewAnalyticsLog, 'id'>) => void;
   onAddClient: (newClient: Client) => void;
   onUpdateClient: (updatedClient: Client) => void;
   onDeleteClient: (clientId: string) => void;
@@ -78,6 +82,10 @@ interface CustomerManagementProps {
 export const CustomerManagement: React.FC<CustomerManagementProps> = ({
   clients,
   presentations,
+  shareTokens = [],
+  onCreateShareToken,
+  onDeleteShareToken,
+  onLogAnalytics,
   onAddClient,
   onUpdateClient,
   onDeleteClient,
@@ -594,6 +602,9 @@ export const CustomerManagement: React.FC<CustomerManagementProps> = ({
         <ShareLinkModal
           client={sharingClient}
           assignedPresentations={presentations.filter((p) => p.clientId === sharingClient.id)}
+          shareTokens={shareTokens}
+          onCreateShareToken={onCreateShareToken}
+          onDeleteShareToken={onDeleteShareToken}
           onClose={() => setSharingClient(null)}
           onOpenPortal={(cli) => setPortalClient(cli)}
         />
@@ -609,6 +620,7 @@ export const CustomerManagement: React.FC<CustomerManagementProps> = ({
             setPortalClient(null);
             handleOpenEditModal(cli);
           }}
+          onLogAnalytics={onLogAnalytics}
         />
       )}
     </div>

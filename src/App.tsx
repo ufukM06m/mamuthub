@@ -28,7 +28,7 @@ import {
   DEFAULT_FIELDS, 
   DEFAULT_TARGET_AUDIENCES 
 } from './data/mockData';
-import { Presentation, Category, Client, ViewMode, User, ViewAnalyticsLog, ClientFeedback, AuditLog } from './types';
+import { Presentation, Category, Client, ViewMode, User, ViewAnalyticsLog, ClientFeedback, AuditLog, ShareToken } from './types';
 import { generatePresentationPDF } from './utils/pdfExport';
 import { FileText, Plus, LayoutGrid, List, Folders, Briefcase } from 'lucide-react';
 import { subscribeToCollection, upsertItem, removeItem, replaceCollection, savePresentationAssets, loadPresentationAssets, clearPresentationAssetCache, getIsQuotaExceeded } from './lib/firestoreService';
@@ -135,6 +135,7 @@ export default function App() {
   const [analyticsLogs, setAnalyticsLogs] = useState<ViewAnalyticsLog[]>(initialAnalyticsLogs);
   const [feedbacks, setFeedbacks] = useState<ClientFeedback[]>(initialFeedbacks);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>(initialAuditLogs);
+  const [shareTokens, setShareTokens] = useState<ShareToken[]>([]);
 
   const [allFields, setAllFields] = useState<string[]>(() => {
     try {
@@ -283,6 +284,7 @@ export default function App() {
     const unsubAnalytics = subscribeToCollection<ViewAnalyticsLog>('analytics', [], setAnalyticsLogs);
     const unsubFeedbacks = subscribeToCollection<ClientFeedback>('feedbacks', [], setFeedbacks);
     const unsubAudit = subscribeToCollection<AuditLog>('auditLogs', [], setAuditLogs);
+    const unsubShareTokens = subscribeToCollection<ShareToken>('shareTokens', [], setShareTokens);
 
     const unsubTaxonomy = subscribeToCollection<TaxonomyDoc>(
       'taxonomy',
@@ -309,6 +311,7 @@ export default function App() {
       unsubAnalytics();
       unsubFeedbacks();
       unsubAudit();
+      unsubShareTokens();
       unsubTaxonomy();
     };
   }, []);
@@ -351,6 +354,32 @@ export default function App() {
     removeItem('feedbacks', id);
   };
 
+  const handleCreateShareToken = (newTokenData: Omit<ShareToken, 'id' | 'createdAt' | 'viewCount'>) => {
+    const created: ShareToken = {
+      ...newTokenData,
+      id: `st-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+      createdAt: new Date().toISOString(),
+      viewCount: 0,
+    };
+    setShareTokens((prev) => [created, ...prev]);
+    upsertItem('shareTokens', created);
+    return created;
+  };
+
+  const handleDeleteShareToken = (tokenId: string) => {
+    setShareTokens((prev) => prev.filter((t) => t.id !== tokenId));
+    removeItem('shareTokens', tokenId);
+  };
+
+  const handleLogAnalytics = (logData: Omit<ViewAnalyticsLog, 'id'>) => {
+    const newLog: ViewAnalyticsLog = {
+      ...logData,
+      id: `log-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+    };
+    setAnalyticsLogs((prev) => [newLog, ...prev]);
+    upsertItem('analytics', newLog);
+  };
+
   const unreadFeedbacksCount = useMemo(() => {
     return feedbacks.filter((f) => f.status === 'Yeni').length;
   }, [feedbacks]);
@@ -380,7 +409,8 @@ export default function App() {
   const [isUploadPdfModalOpen, setIsUploadPdfModalOpen] = useState<boolean>(false);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState<boolean>(false);
 
-  // Check URL parameters for standalone Client Portal link (?portal=CLIENT_ID or ?id=CLIENT_ID)
+  // Check URL parameters for standalone Client Portal link (?token=TOKEN_ID or ?portal=CLIENT_ID)
+  const [activeShareToken, setActiveShareToken] = useState<ShareToken | null>(null);
   const [standalonePortalClient, setStandalonePortalClient] = useState<Client | null>(() => {
     try {
       const params = new URLSearchParams(window.location.search);
@@ -394,6 +424,35 @@ export default function App() {
     }
     return null;
   });
+
+  useEffect(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const tokenId = params.get('token');
+      const portalId = params.get('portal') || params.get('id');
+
+      if (tokenId) {
+        const foundTok = shareTokens.find((t) => t.id === tokenId);
+        if (foundTok) {
+          setActiveShareToken(foundTok);
+          const foundCli = clients.find((c) => c.id === foundTok.clientId) || initialClients.find((c) => c.id === foundTok.clientId);
+          if (foundCli) {
+            setStandalonePortalClient(foundCli);
+            return;
+          }
+        }
+      }
+
+      if (portalId) {
+        const foundCli = clients.find((c) => c.id === portalId) || initialClients.find((c) => c.id === portalId);
+        if (foundCli) {
+          setStandalonePortalClient(foundCli);
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }, [shareTokens, clients]);
 
   // Dynamic Category count update
   const categoriesWithCounts = useMemo(() => {
@@ -1035,11 +1094,15 @@ export default function App() {
       <ClientPortalModal
         client={standalonePortalClient}
         assignedPresentations={presentations.filter((p) => p.clientId === standalonePortalClient.id)}
+        shareToken={activeShareToken}
+        isStandalone={true}
         onClose={() => {
           window.history.replaceState({}, '', window.location.pathname);
           setStandalonePortalClient(null);
+          setActiveShareToken(null);
         }}
         onSendFeedback={handleSendFeedback}
+        onLogAnalytics={handleLogAnalytics}
       />
     );
   }
@@ -1089,6 +1152,10 @@ export default function App() {
             <CustomerManagement
               clients={clients}
               presentations={presentations}
+              shareTokens={shareTokens}
+              onCreateShareToken={handleCreateShareToken}
+              onDeleteShareToken={handleDeleteShareToken}
+              onLogAnalytics={handleLogAnalytics}
               onAddClient={handleAddClient}
               onUpdateClient={handleUpdateClient}
               onDeleteClient={handleDeleteClient}

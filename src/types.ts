@@ -111,3 +111,17 @@ export interface AuditLog {
   timestamp: string;
   ipAddress?: string;
 }
+
+export interface ShareToken {
+  id: string;
+  clientId: string;
+  companyName: string;
+  contactPerson: string;
+  createdAt: string;
+  expiresInDays: '1' | '7' | '30' | 'unlimited';
+  expiresAt: string | null;
+  pinCode?: string;
+  createdById?: string;
+  viewCount: number;
+  lastViewedAt?: string;
+}
