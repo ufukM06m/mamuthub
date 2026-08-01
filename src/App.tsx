@@ -30,7 +30,7 @@ import {
 } from './data/mockData';
 import { Presentation, Category, Client, ViewMode, User, ViewAnalyticsLog, ClientFeedback, AuditLog, ShareToken } from './types';
 import { generatePresentationPDF } from './utils/pdfExport';
-import { FileText, Plus, LayoutGrid, List, Folders, Briefcase } from 'lucide-react';
+import { FileText, Plus, LayoutGrid, List, Folders, Briefcase, AlertTriangle } from 'lucide-react';
 import { subscribeToCollection, upsertItem, removeItem, replaceCollection, savePresentationAssets, loadPresentationAssets, clearPresentationAssetCache, getIsQuotaExceeded } from './lib/firestoreService';
 import { deletePresentationFromStorage } from './lib/firebaseStorageService';
 import { ToastContainer, ToastMessage } from './components/Toast';
@@ -135,7 +135,14 @@ export default function App() {
   const [analyticsLogs, setAnalyticsLogs] = useState<ViewAnalyticsLog[]>(initialAnalyticsLogs);
   const [feedbacks, setFeedbacks] = useState<ClientFeedback[]>(initialFeedbacks);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>(initialAuditLogs);
-  const [shareTokens, setShareTokens] = useState<ShareToken[]>([]);
+  const [shareTokens, setShareTokens] = useState<ShareToken[]>(() => {
+    try {
+      const saved = localStorage.getItem('mamuthub_share_tokens');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
 
   const [allFields, setAllFields] = useState<string[]>(() => {
     try {
@@ -284,7 +291,16 @@ export default function App() {
     const unsubAnalytics = subscribeToCollection<ViewAnalyticsLog>('analytics', [], setAnalyticsLogs);
     const unsubFeedbacks = subscribeToCollection<ClientFeedback>('feedbacks', [], setFeedbacks);
     const unsubAudit = subscribeToCollection<AuditLog>('auditLogs', [], setAuditLogs);
-    const unsubShareTokens = subscribeToCollection<ShareToken>('shareTokens', [], setShareTokens);
+    const unsubShareTokens = subscribeToCollection<ShareToken>('shareTokens', [], (tokens) => {
+      if (tokens) {
+        setShareTokens(tokens);
+        try {
+          localStorage.setItem('mamuthub_share_tokens', JSON.stringify(tokens));
+        } catch {
+          // ignore
+        }
+      }
+    });
 
     const unsubTaxonomy = subscribeToCollection<TaxonomyDoc>(
       'taxonomy',
@@ -361,13 +377,29 @@ export default function App() {
       createdAt: new Date().toISOString(),
       viewCount: 0,
     };
-    setShareTokens((prev) => [created, ...prev]);
+    setShareTokens((prev) => {
+      const updated = [created, ...prev];
+      try {
+        localStorage.setItem('mamuthub_share_tokens', JSON.stringify(updated));
+      } catch {
+        // ignore
+      }
+      return updated;
+    });
     upsertItem('shareTokens', created);
     return created;
   };
 
   const handleDeleteShareToken = (tokenId: string) => {
-    setShareTokens((prev) => prev.filter((t) => t.id !== tokenId));
+    setShareTokens((prev) => {
+      const updated = prev.filter((t) => t.id !== tokenId);
+      try {
+        localStorage.setItem('mamuthub_share_tokens', JSON.stringify(updated));
+      } catch {
+        // ignore
+      }
+      return updated;
+    });
     removeItem('shareTokens', tokenId);
   };
 
@@ -411,48 +443,58 @@ export default function App() {
 
   // Check URL parameters for standalone Client Portal link (?token=TOKEN_ID or ?portal=CLIENT_ID)
   const [activeShareToken, setActiveShareToken] = useState<ShareToken | null>(null);
-  const [standalonePortalClient, setStandalonePortalClient] = useState<Client | null>(() => {
+  const [standalonePortalClient, setStandalonePortalClient] = useState<Client | null>(null);
+
+  const urlParams = useMemo(() => {
     try {
-      const params = new URLSearchParams(window.location.search);
-      const portalId = params.get('portal') || params.get('id');
-      if (portalId) {
-        const found = initialClients.find((c) => c.id === portalId);
-        return found || null;
-      }
+      return new URLSearchParams(window.location.search);
     } catch {
-      // ignore
+      return new URLSearchParams();
     }
-    return null;
-  });
+  }, []);
+
+  const requestedTokenId = urlParams.get('token');
+  const requestedPortalId = urlParams.get('portal') || urlParams.get('id');
+  const isPortalRoute = Boolean(requestedTokenId || requestedPortalId);
+
+  const [isPortalResolving, setIsPortalResolving] = useState<boolean>(isPortalRoute);
 
   useEffect(() => {
-    try {
-      const params = new URLSearchParams(window.location.search);
-      const tokenId = params.get('token');
-      const portalId = params.get('portal') || params.get('id');
-
-      if (tokenId) {
-        const foundTok = shareTokens.find((t) => t.id === tokenId);
-        if (foundTok) {
-          setActiveShareToken(foundTok);
-          const foundCli = clients.find((c) => c.id === foundTok.clientId) || initialClients.find((c) => c.id === foundTok.clientId);
-          if (foundCli) {
-            setStandalonePortalClient(foundCli);
-            return;
-          }
-        }
-      }
-
-      if (portalId) {
-        const foundCli = clients.find((c) => c.id === portalId) || initialClients.find((c) => c.id === portalId);
-        if (foundCli) {
-          setStandalonePortalClient(foundCli);
-        }
-      }
-    } catch {
-      // ignore
+    if (!isPortalRoute) {
+      setIsPortalResolving(false);
+      return;
     }
-  }, [shareTokens, clients]);
+
+    let foundClient: Client | null = null;
+    let foundToken: ShareToken | null = null;
+
+    if (requestedTokenId) {
+      foundToken = shareTokens.find((t) => t.id === requestedTokenId) || null;
+      if (foundToken) {
+        foundClient =
+          clients.find((c) => c.id === foundToken!.clientId) ||
+          initialClients.find((c) => c.id === foundToken!.clientId) ||
+          null;
+      }
+    } else if (requestedPortalId) {
+      foundClient =
+        clients.find((c) => c.id === requestedPortalId) ||
+        initialClients.find((c) => c.id === requestedPortalId) ||
+        null;
+    }
+
+    if (foundClient) {
+      setStandalonePortalClient(foundClient);
+      setActiveShareToken(foundToken);
+      setIsPortalResolving(false);
+    } else {
+      // Allow up to 3 seconds for Firestore async subscriptions to load data
+      const timer = setTimeout(() => {
+        setIsPortalResolving(false);
+      }, 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [isPortalRoute, requestedTokenId, requestedPortalId, shareTokens, clients]);
 
   // Dynamic Category count update
   const categoriesWithCounts = useMemo(() => {
@@ -1104,6 +1146,44 @@ export default function App() {
         onSendFeedback={handleSendFeedback}
         onLogAnalytics={handleLogAnalytics}
       />
+    );
+  }
+
+  // Handle portal route loading or invalid link screen
+  if (isPortalRoute) {
+    if (isPortalResolving) {
+      return (
+        <div className="fixed inset-0 bg-[#080d1a] flex flex-col items-center justify-center p-4 text-slate-100">
+          <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mb-4" />
+          <h2 className="text-base font-bold text-white">Müşteri Sunum Portalı Yükleniyor...</h2>
+          <p className="text-xs text-slate-400 mt-1">Lütfen bekleyiniz, erişim bağlantısı doğrulanıyor.</p>
+        </div>
+      );
+    }
+
+    return (
+      <div className="fixed inset-0 bg-[#080d1a] flex items-center justify-center p-4 text-slate-100">
+        <div className="bg-[#121929] border border-red-500/30 rounded-2xl p-8 w-full max-w-md text-center space-y-5 shadow-2xl">
+          <div className="w-16 h-16 rounded-2xl bg-red-500/10 border border-red-500/30 flex items-center justify-center text-red-400 mx-auto">
+            <AlertTriangle className="w-8 h-8" />
+          </div>
+          <div className="space-y-2">
+            <h2 className="text-lg font-bold text-white">Bağlantı Bulunamadı veya İptal Edildi</h2>
+            <p className="text-xs text-slate-400 leading-relaxed">
+              Erişmeye çalıştığınız müşteri sunum bağlantısı sistemde bulunamadı, silinmiş veya süresi dolmuş olabilir. Lütfen Müşteri Temsilciniz ile iletişime geçiniz.
+            </p>
+          </div>
+          <button
+            onClick={() => {
+              window.history.replaceState({}, '', window.location.pathname);
+              window.location.reload();
+            }}
+            className="px-5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold transition-all"
+          >
+            Ana Sayfaya Dön
+          </button>
+        </div>
+      </div>
     );
   }
 
