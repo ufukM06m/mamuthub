@@ -165,50 +165,9 @@ export function clearPresentationAssetCache(presId: string): void {
   assetMemoryCache.delete(presId);
 }
 
-// Save large presentation assets (base64 PDF data & slide images) to separate Firestore sub-documents
+// Save large presentation assets in active memory cache (local IndexedDB holds permanent copy)
 export async function savePresentationAssets(presId: string, pdfUrl?: string, extractedImages?: string[]): Promise<void> {
   assetMemoryCache.set(presId, { pdfUrl, extractedImages });
-  if (isFirestoreQuotaExceeded) return;
-  try {
-    const tasks: Array<() => Promise<void>> = [];
-
-    if (pdfUrl && pdfUrl.startsWith('data:')) {
-      const chunkSize = 500 * 1024;
-      if (pdfUrl.length <= chunkSize) {
-        tasks.push(() => setDoc(doc(db, 'presentation_assets', `${presId}_pdf`), { data: pdfUrl, presId }));
-      } else {
-        const totalChunks = Math.ceil(pdfUrl.length / chunkSize);
-        for (let i = 0; i < totalChunks; i++) {
-          const chunk = pdfUrl.slice(i * chunkSize, (i + 1) * chunkSize);
-          tasks.push(() => setDoc(doc(db, 'presentation_assets', `${presId}_pdf_${i}`), { chunk, presId, index: i, total: totalChunks }));
-        }
-      }
-    }
-
-    // Execute in smaller batches of 2 with a brief pause
-    const BATCH_SIZE = 2;
-    for (let i = 0; i < tasks.length; i += BATCH_SIZE) {
-      if (isFirestoreQuotaExceeded) break;
-      const batch = tasks.slice(i, i + BATCH_SIZE);
-      await Promise.all(
-        batch.map((fn) =>
-          Promise.race([
-            fn(),
-            new Promise((_, reject) => setTimeout(() => reject(new Error('Chunk timeout')), 3000)),
-          ]).catch((err) => {
-            checkQuotaError(err);
-            console.warn('Asset save chunk warning:', err);
-          })
-        )
-      );
-      if (i + BATCH_SIZE < tasks.length) {
-        await new Promise((res) => setTimeout(res, 50));
-      }
-    }
-  } catch (err) {
-    checkQuotaError(err);
-    console.warn('Failed to save presentation assets to Firestore:', err);
-  }
 }
 
 // Load presentation assets from Firestore in ONE single query call with fast timeout

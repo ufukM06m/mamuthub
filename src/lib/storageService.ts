@@ -276,12 +276,8 @@ export async function sanitizePresentationForFirestore<T extends Record<string, 
 
   const presId = sanitized.id || 'pres_' + Date.now();
 
-  // Save raw data to presentation_assets sub-documents in Firestore as persistent fallback
-  try {
-    savePresentationAssets(presId, pres.pdfUrl, pres.extractedImages).catch(() => {});
-  } catch {
-    // ignore
-  }
+  // Update memory cache
+  savePresentationAssets(presId, pres.pdfUrl, pres.extractedImages).catch(() => {});
 
   // 2. Try Cloud Storage Upload for PDF binary
   if (typeof sanitized.pdfUrl === 'string' && sanitized.pdfUrl.startsWith('data:')) {
@@ -289,7 +285,7 @@ export async function sanitizePresentationForFirestore<T extends Record<string, 
     if (storagePdfUrl) {
       sanitized.pdfUrl = storagePdfUrl;
     } else {
-      // Fallback: strip heavy base64 PDF binary from main doc (stored in presentation_assets & IndexedDB)
+      // Strip heavy base64 PDF binary from main Firestore document (stored locally in IndexedDB)
       delete sanitized.pdfUrl;
     }
   }
@@ -300,7 +296,8 @@ export async function sanitizePresentationForFirestore<T extends Record<string, 
     if (storageThumbUrl) {
       sanitized.thumbnailUrl = storageThumbUrl;
     } else {
-      sanitized.thumbnailUrl = await compressImageDataUrl(sanitized.thumbnailUrl, 500, 0.7);
+      // Compress thumbnail to lightweight preview (~15-30KB)
+      sanitized.thumbnailUrl = await compressImageDataUrl(sanitized.thumbnailUrl, 350, 0.5);
     }
   }
 
@@ -312,25 +309,10 @@ export async function sanitizePresentationForFirestore<T extends Record<string, 
       if (storageSlideUrls && storageSlideUrls.length > 0) {
         sanitized.extractedImages = storageSlideUrls;
       } else {
-        // Fallback: compress slide images for main Firestore doc
-        const slideImages = sanitized.extractedImages.slice(0, 10);
-        const compressedList: string[] = [];
-        for (const imgUrl of slideImages) {
-          if (typeof imgUrl === 'string' && imgUrl.startsWith('data:image/')) {
-            const compressed = await compressImageDataUrl(imgUrl, 600, 0.6);
-            compressedList.push(compressed);
-          } else {
-            compressedList.push(imgUrl);
-          }
-        }
-        sanitized.extractedImages = compressedList;
+        // Strip heavy base64 slide images from main Firestore document (stored locally in IndexedDB)
+        delete sanitized.extractedImages;
       }
     }
-  }
-
-  // 5. Final safety boundary: if total payload is still over 500 KB, strip extractedImages from main doc (stored in presentation_assets)
-  if (JSON.stringify(sanitized).length > 500 * 1024) {
-    delete sanitized.extractedImages;
   }
 
   return sanitized as T;

@@ -109,13 +109,6 @@ export default function App() {
       // ignore
     }
 
-    // Purge old mock test items once from Firestore and local storage
-    const mockIds = ['pres-1', 'pres-2', 'pres-3', 'pres-4'];
-    for (const mockId of mockIds) {
-      removeItem('presentations', mockId).catch(() => {});
-      deleteLocalPresentation(mockId).catch(() => {});
-      addDeletedPresId(mockId);
-    }
   }, [currentUser]);
 
   const [presentations, setPresentations] = useState<Presentation[]>([]);
@@ -166,15 +159,14 @@ export default function App() {
     getLocalPresentations<Presentation>().then((localPres) => {
       const deletedIds = getDeletedPresIds();
       const favIds = getFavoritePresIds();
-      const mockIds = ['pres-1', 'pres-2', 'pres-3', 'pres-4'];
       if (localPres && localPres.length > 0) {
         setPresentations((prev) => {
           const map = new Map<string, Presentation>();
           prev.forEach((p) => {
-            if (!deletedIds.includes(p.id) && !mockIds.includes(p.id)) map.set(p.id, p);
+            if (!deletedIds.includes(p.id)) map.set(p.id, p);
           });
           localPres.forEach((lp) => {
-            if (deletedIds.includes(lp.id) || mockIds.includes(lp.id)) return;
+            if (deletedIds.includes(lp.id)) return;
             const existing = map.get(lp.id);
             const isFav = favIds.includes(lp.id) || !!lp.isFavorite;
             if (existing) {
@@ -201,11 +193,10 @@ export default function App() {
       getLocalPresentations<Presentation>().then(async (localPres) => {
         const deletedIds = getDeletedPresIds();
         const favIds = getFavoritePresIds();
-        const mockIds = ['pres-1', 'pres-2', 'pres-3', 'pres-4'];
         const map = new Map<string, Presentation>();
 
-        const validFirestore = firestorePres.filter((fp) => !deletedIds.includes(fp.id) && !mockIds.includes(fp.id));
-        const validLocal = localPres.filter((lp) => !deletedIds.includes(lp.id) && !mockIds.includes(lp.id));
+        const validFirestore = firestorePres.filter((fp) => !deletedIds.includes(fp.id));
+        const validLocal = localPres.filter((lp) => !deletedIds.includes(lp.id));
 
         // 1. First add local user presentations from IndexedDB (they hold complete binary PDF data and local edits)
         validLocal.forEach((lp) => {
@@ -215,33 +206,16 @@ export default function App() {
           });
         });
 
-        // 2. Merge Firestore documents (ensuring local edits and local PDF/images override Firestore sanitized data)
+        // 2. Merge Firestore documents
         await Promise.all(
           validFirestore.map(async (fp) => {
             const lp = map.get(fp.id);
-
-            // If pdfUrl or extractedImages are missing in both Firestore doc and local storage, attempt loading from presentation_assets
-            if (
-              (!fp.pdfUrl || !fp.extractedImages || fp.extractedImages.length === 0) &&
-              (!lp || !lp.pdfUrl || !lp.extractedImages || lp.extractedImages.length === 0)
-            ) {
-              try {
-                const assets = await loadPresentationAssets(fp.id);
-                if (assets.pdfUrl) fp.pdfUrl = fp.pdfUrl || assets.pdfUrl;
-                if (assets.extractedImages && assets.extractedImages.length > 0) {
-                  fp.extractedImages = assets.extractedImages;
-                }
-              } catch {
-                // ignore
-              }
-            }
-
             const isFav = favIds.includes(fp.id) || (lp ? !!lp.isFavorite : !!fp.isFavorite);
 
             if (lp) {
               const merged = {
                 ...fp,
-                ...lp, // local user edits take priority
+                ...lp, // local user edits & full binary PDF take priority
                 isFavorite: isFav,
                 pdfUrl: lp.pdfUrl || fp.pdfUrl,
                 extractedImages:
@@ -268,10 +242,6 @@ export default function App() {
             if (p.createdAt) {
               const parsed = Date.parse(p.createdAt);
               if (!isNaN(parsed) && parsed > 0) return parsed;
-            }
-            if (p.id.startsWith('pres-')) {
-              const num = parseInt(p.id.replace('pres-', ''), 10);
-              if (!isNaN(num) && num > 100000) return num;
             }
             return 0;
           };
@@ -1015,14 +985,13 @@ export default function App() {
     getLocalPresentations<Presentation>().then((localPres) => {
       if (localPres && localPres.length > 0) {
         const deletedIds = getDeletedPresIds();
-        const mockIds = ['pres-1', 'pres-2', 'pres-3', 'pres-4'];
         setPresentations((prev) => {
           const map = new Map<string, Presentation>();
           prev.forEach((p) => {
-            if (!deletedIds.includes(p.id) && !mockIds.includes(p.id)) map.set(p.id, p);
+            if (!deletedIds.includes(p.id)) map.set(p.id, p);
           });
           localPres.forEach((lp) => {
-            if (deletedIds.includes(lp.id) || mockIds.includes(lp.id)) return;
+            if (deletedIds.includes(lp.id)) return;
             const existing = map.get(lp.id);
             if (existing) {
               map.set(lp.id, {
