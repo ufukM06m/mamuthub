@@ -122,6 +122,24 @@ export async function removeItem(collectionName: string, id: string) {
   }
 }
 
+export async function getItemById<T extends { id: string }>(
+  collectionName: string,
+  id: string
+): Promise<T | null> {
+  if (isFirestoreQuotaExceeded) return null;
+  try {
+    const docRef = doc(db, collectionName, id);
+    const snap = await getDoc(docRef);
+    if (snap.exists()) {
+      return { id: snap.id, ...snap.data() } as T;
+    }
+  } catch (err) {
+    checkQuotaError(err);
+    console.warn(`Error fetching ${collectionName}/${id}:`, err);
+  }
+  return null;
+}
+
 export async function replaceCollection<T extends { id: string }>(
   collectionName: string,
   newItems: T[]

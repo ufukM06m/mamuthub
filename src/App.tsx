@@ -31,7 +31,7 @@ import {
 import { Presentation, Category, Client, ViewMode, User, ViewAnalyticsLog, ClientFeedback, AuditLog, ShareToken } from './types';
 import { generatePresentationPDF } from './utils/pdfExport';
 import { FileText, Plus, LayoutGrid, List, Folders, Briefcase, AlertTriangle } from 'lucide-react';
-import { subscribeToCollection, upsertItem, removeItem, replaceCollection, savePresentationAssets, loadPresentationAssets, clearPresentationAssetCache, getIsQuotaExceeded } from './lib/firestoreService';
+import { subscribeToCollection, upsertItem, removeItem, replaceCollection, savePresentationAssets, loadPresentationAssets, clearPresentationAssetCache, getIsQuotaExceeded, getItemById } from './lib/firestoreService';
 import { deletePresentationFromStorage } from './lib/firebaseStorageService';
 import { ToastContainer, ToastMessage } from './components/Toast';
 import { 
@@ -371,9 +371,14 @@ export default function App() {
   };
 
   const handleCreateShareToken = (newTokenData: Omit<ShareToken, 'id' | 'createdAt' | 'viewCount'>) => {
+    const expiresAtMs = newTokenData.expiresAt ? new Date(newTokenData.expiresAt).getTime() : 0;
+    const pinStr = newTokenData.pinCode ? newTokenData.pinCode : '0';
+    const randStr = Math.random().toString(36).substring(2, 7);
+    const createdId = `st_${newTokenData.clientId}_${expiresAtMs}_${pinStr}_${randStr}`;
+
     const created: ShareToken = {
       ...newTokenData,
-      id: `st-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+      id: createdId,
       createdAt: new Date().toISOString(),
       viewCount: 0,
     };
@@ -465,35 +470,100 @@ export default function App() {
       return;
     }
 
-    let foundClient: Client | null = null;
-    let foundToken: ShareToken | null = null;
+    let isMounted = true;
 
-    if (requestedTokenId) {
-      foundToken = shareTokens.find((t) => t.id === requestedTokenId) || null;
-      if (foundToken) {
+    async function resolvePortal() {
+      setIsPortalResolving(true);
+
+      let foundToken: ShareToken | null = null;
+      let foundClient: Client | null = null;
+
+      if (requestedTokenId) {
+        // 1. Check state shareTokens
+        foundToken = shareTokens.find((t) => t.id === requestedTokenId) || null;
+
+        // 2. Check localStorage
+        if (!foundToken) {
+          try {
+            const saved = localStorage.getItem('mamuthub_share_tokens');
+            if (saved) {
+              const list: ShareToken[] = JSON.parse(saved);
+              foundToken = list.find((t) => t.id === requestedTokenId) || null;
+            }
+          } catch {
+            // ignore
+          }
+        }
+
+        // 3. Try parsing embedded token format (st_<clientId>_<expiresAtMs>_<pinCode>_<rand>)
+        if (!foundToken && requestedTokenId.startsWith('st_')) {
+          const parts = requestedTokenId.split('_');
+          if (parts.length >= 5) {
+            const clientId = parts[1];
+            const expiresAtMs = parseInt(parts[2], 10);
+            const pinCode = parts[3] !== '0' ? parts[3] : undefined;
+            const targetClient =
+              clients.find((c) => c.id === clientId) ||
+              initialClients.find((c) => c.id === clientId);
+
+            foundToken = {
+              id: requestedTokenId,
+              clientId,
+              companyName: targetClient ? targetClient.companyName : 'Müşteri',
+              contactPerson: targetClient ? targetClient.contactPerson : 'Müşteri Yetkilisi',
+              createdAt: new Date().toISOString(),
+              expiresInDays: '7',
+              expiresAt: expiresAtMs > 0 ? new Date(expiresAtMs).toISOString() : null,
+              pinCode,
+              viewCount: 1,
+            };
+          }
+        }
+
+        // 4. Fetch directly from Firestore document if still not found
+        if (!foundToken) {
+          foundToken = await getItemById<ShareToken>('shareTokens', requestedTokenId);
+        }
+
+        // Find associated client
+        if (foundToken) {
+          foundClient =
+            clients.find((c) => c.id === foundToken!.clientId) ||
+            initialClients.find((c) => c.id === foundToken!.clientId) ||
+            null;
+
+          if (!foundClient) {
+            foundClient = await getItemById<Client>('clients', foundToken.clientId);
+          }
+        }
+      } else if (requestedPortalId) {
         foundClient =
-          clients.find((c) => c.id === foundToken!.clientId) ||
-          initialClients.find((c) => c.id === foundToken!.clientId) ||
+          clients.find((c) => c.id === requestedPortalId) ||
+          initialClients.find((c) => c.id === requestedPortalId) ||
           null;
+
+        if (!foundClient) {
+          foundClient = await getItemById<Client>('clients', requestedPortalId);
+        }
       }
-    } else if (requestedPortalId) {
-      foundClient =
-        clients.find((c) => c.id === requestedPortalId) ||
-        initialClients.find((c) => c.id === requestedPortalId) ||
-        null;
+
+      if (isMounted) {
+        if (foundClient) {
+          setStandalonePortalClient(foundClient);
+          setActiveShareToken(foundToken);
+        } else {
+          setStandalonePortalClient(null);
+          setActiveShareToken(null);
+        }
+        setIsPortalResolving(false);
+      }
     }
 
-    if (foundClient) {
-      setStandalonePortalClient(foundClient);
-      setActiveShareToken(foundToken);
-      setIsPortalResolving(false);
-    } else {
-      // Allow up to 3 seconds for Firestore async subscriptions to load data
-      const timer = setTimeout(() => {
-        setIsPortalResolving(false);
-      }, 3000);
-      return () => clearTimeout(timer);
-    }
+    resolvePortal();
+
+    return () => {
+      isMounted = false;
+    };
   }, [isPortalRoute, requestedTokenId, requestedPortalId, shareTokens, clients]);
 
   // Dynamic Category count update
