@@ -220,21 +220,28 @@ export default function App() {
             const lp = map.get(fp.id);
             const isFav = favIds.includes(fp.id) || (lp ? !!lp.isFavorite : !!fp.isFavorite);
 
+            const assets = await loadPresentationAssets(fp.id);
+
             if (lp) {
-              const merged = {
+              const merged: Presentation = {
                 ...fp,
                 ...lp, // local user edits & full binary PDF take priority
                 isFavorite: isFav,
-                pdfUrl: lp.pdfUrl || fp.pdfUrl,
+                pdfUrl: lp.pdfUrl || assets.pdfUrl || fp.pdfUrl,
                 extractedImages:
                   lp.extractedImages && lp.extractedImages.length > 0
                     ? lp.extractedImages
-                    : fp.extractedImages,
+                    : assets.extractedImages || fp.extractedImages,
               };
               map.set(fp.id, merged);
               saveLocalPresentation(merged).catch(() => {});
             } else {
-              const merged = { ...fp, isFavorite: isFav };
+              const merged: Presentation = {
+                ...fp,
+                isFavorite: isFav,
+                pdfUrl: assets.pdfUrl || fp.pdfUrl,
+                extractedImages: assets.extractedImages || fp.extractedImages,
+              };
               map.set(fp.id, merged);
               saveLocalPresentation(merged).catch(() => {});
             }

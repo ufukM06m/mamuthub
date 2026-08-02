@@ -106,6 +106,11 @@ export async function saveLocalPresentation<T extends { id: string; pdfUrl?: str
     // ignore
   }
 
+  // Sync memory cache if assets are provided
+  if (presentation.pdfUrl || (presentation.extractedImages && presentation.extractedImages.length > 0)) {
+    savePresentationAssets(presentation.id, presentation.pdfUrl, presentation.extractedImages).catch(() => {});
+  }
+
   try {
     const db = await openDB();
     return new Promise((resolve, reject) => {
@@ -120,9 +125,14 @@ export async function saveLocalPresentation<T extends { id: string; pdfUrl?: str
             ...existing,
             ...presentation,
             pdfUrl: presentation.pdfUrl !== undefined ? presentation.pdfUrl : existing.pdfUrl,
-            extractedImages: presentation.extractedImages !== undefined ? presentation.extractedImages : existing.extractedImages,
+            extractedImages:
+              presentation.extractedImages && presentation.extractedImages.length > 0
+                ? presentation.extractedImages
+                : existing.extractedImages,
           };
         }
+        // Update memory cache with final object
+        savePresentationAssets(toSave.id, toSave.pdfUrl, toSave.extractedImages).catch(() => {});
         const putReq = store.put(toSave);
         putReq.onsuccess = () => resolve();
         putReq.onerror = () => reject(putReq.error);
