@@ -70,7 +70,93 @@ export const initialClients: Client[] = [
   },
 ];
 
-export const initialPresentations: Presentation[] = [];
+export const initialPresentations: Presentation[] = [
+  {
+    id: 'pres-1',
+    code: 'PS-033_GENC_IHRACATCILAR_G_PROGRAMI',
+    title: 'PS 033 Genc İhracatçılar Geliştirme Programı',
+    description: 'Genç İhracatçılar Geliştirme Programı Kurumsal Tanıtım ve Eğitim Sunumu',
+    category: 'HUB ANA ÜRÜNLER',
+    pageCount: 15,
+    updatedAt: new Date().toISOString(),
+    createdAt: new Date().toISOString(),
+    thumbnailUrl: 'https://images.unsplash.com/photo-1542744094-3a31b272c490?auto=format&fit=crop&w=800&q=80',
+    pdfFileName: 'PS-033_Genc_Ihracatcilar.pdf',
+    pdfFileSize: '2.4 MB',
+    isFavorite: false,
+    tags: ['İhracat', 'Eğitim', 'Kurumsal'],
+    fields: ['Girişimcilik & İnovasyon', 'Eğitim & İK'],
+    targetAudiences: ['Gençler', 'Girişimciler'],
+    slides: [
+      {
+        id: 's1',
+        title: 'Genç İhracatçılar Geliştirme Programı',
+        subtitle: 'PS-033 Program Tanıtım Sunumu',
+        content: 'MAMUTHUB Kurumsal İhracat Akademisi ve Stratejik Büyüme Programı',
+        layout: 'title',
+      },
+      {
+        id: 's2',
+        title: 'Program Amaç & Hedefleri',
+        subtitle: 'Küresel Pazarlara Açılım',
+        content: '1. İhracat Yetkinliklerinin Geliştirilmesi\n2. Hedef Pazar Analiz Yöntemleri\n3. Dijital Ticaret Kanallarının Entegrasyonu',
+        layout: 'content-left',
+      },
+    ],
+  },
+  {
+    id: 'pres-2',
+    code: 'PS-035_CITY_IMPACT_ENGINE',
+    title: 'PS 035 City Impact Engine',
+    description: 'Şehir Etkisi ve Sürdürülebilirlik İnovasyon Motoru Sunumu',
+    category: 'HUB ANA ÜRÜNLER',
+    pageCount: 19,
+    updatedAt: new Date().toISOString(),
+    createdAt: new Date().toISOString(),
+    thumbnailUrl: 'https://images.unsplash.com/photo-1519389950473-47ba0277781c?auto=format&fit=crop&w=800&q=80',
+    pdfFileName: 'PS-035_City_Impact_Engine.pdf',
+    pdfFileSize: '3.1 MB',
+    isFavorite: false,
+    tags: ['Sürdürülebilirlik', 'ESG', 'Akıllı Şehirler'],
+    fields: ['Sürdürülebilirlik & ESG', 'Teknoloji & Yazılım'],
+    targetAudiences: ['Yöneticiler & Takım Liderleri'],
+    slides: [
+      {
+        id: 's1',
+        title: 'City Impact Engine',
+        subtitle: 'PS-035 Sürdürülebilirlik Modeli',
+        content: 'MAMUTHUB Akıllı Şehirler ve Toplumsal Etki Yönetimi',
+        layout: 'title',
+      },
+    ],
+  },
+  {
+    id: 'pres-3',
+    code: 'PS-003_STARTUP_SCHOOL',
+    title: 'PS 003 Startup School',
+    description: 'Girişimcilik ve Hızlandırma Programı Eğitici Sunum Serisi',
+    category: 'HUB ANA ÜRÜNLER',
+    pageCount: 14,
+    updatedAt: new Date().toISOString(),
+    createdAt: new Date().toISOString(),
+    thumbnailUrl: 'https://images.unsplash.com/photo-1522071820081-009f0129c71c?auto=format&fit=crop&w=800&q=80',
+    pdfFileName: 'PS-003_Startup_School.pdf',
+    pdfFileSize: '1.9 MB',
+    isFavorite: false,
+    tags: ['Startup', 'Girişimcilik', 'Akademi'],
+    fields: ['Girişimcilik & İnovasyon'],
+    targetAudiences: ['Girişimciler & Kurucular'],
+    slides: [
+      {
+        id: 's1',
+        title: 'Startup School',
+        subtitle: 'PS-003 Eğitici Müfredat',
+        content: 'Fikirden Ürüne Girişimcilik Rehberi',
+        layout: 'title',
+      },
+    ],
+  },
+];
 
 export const initialUsers: User[] = [
   {
