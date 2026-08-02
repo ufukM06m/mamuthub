@@ -186,56 +186,6 @@ export function clearPresentationAssetCache(presId: string): void {
 // Save large presentation assets in active memory cache (local IndexedDB holds permanent copy)
 export async function savePresentationAssets(presId: string, pdfUrl?: string, extractedImages?: string[]): Promise<void> {
   assetMemoryCache.set(presId, { pdfUrl, extractedImages });
-
-  if (isFirestoreQuotaExceeded) return;
-
-  try {
-    // 1. Save extracted slide images to presentation_assets sub-collection if present
-    if (extractedImages && Array.isArray(extractedImages) && extractedImages.length > 0) {
-      const tasks = extractedImages.map((imgData, i) => {
-        if (typeof imgData === 'string' && imgData.startsWith('data:')) {
-          const slideRef = doc(db, 'presentation_assets', `${presId}_slide_${i}`);
-          return setDoc(slideRef, {
-            presId,
-            slideIndex: i,
-            data: imgData,
-            updatedAt: new Date().toISOString(),
-          }).catch((err) => {
-            checkQuotaError(err);
-          });
-        }
-        return Promise.resolve();
-      });
-      await Promise.all(tasks);
-    }
-
-    // 2. Save base64 PDF chunks to presentation_assets sub-collection if present
-    if (typeof pdfUrl === 'string' && pdfUrl.startsWith('data:')) {
-      const CHUNK_SIZE = 450 * 1024; // 450KB chunks to safely fit Firestore 1MB doc limit
-      const totalChunks = Math.ceil(pdfUrl.length / CHUNK_SIZE);
-      const chunkTasks = [];
-
-      for (let i = 0; i < totalChunks; i++) {
-        const chunk = pdfUrl.substring(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
-        const chunkRef = doc(db, 'presentation_assets', `${presId}_pdf_${i}`);
-        chunkTasks.push(
-          setDoc(chunkRef, {
-            presId,
-            index: i,
-            chunk,
-            totalChunks,
-            updatedAt: new Date().toISOString(),
-          }).catch((err) => {
-            checkQuotaError(err);
-          })
-        );
-      }
-      await Promise.all(chunkTasks);
-    }
-  } catch (err) {
-    checkQuotaError(err);
-    console.warn('Firestore asset sync warning:', err);
-  }
 }
 
 // Load presentation assets from RAM cache, IndexedDB, or Firestore

@@ -145,42 +145,69 @@ export async function saveLocalPresentation<T extends { id: string; pdfUrl?: str
     });
   } catch (err) {
     console.warn('Failed to save presentation to IndexedDB:', err);
-    // LocalStorage fallback for non-huge items or metadata
+  } finally {
+    // Always sync synchronous localStorage backup for instant startup recovery across sessions
     try {
       const saved = localStorage.getItem('mamuthub_local_presentations');
-      const list: T[] = saved ? JSON.parse(saved) : [];
-      const updated = [...list.filter((p) => p.id !== presentation.id), presentation];
-      localStorage.setItem('mamuthub_local_presentations', JSON.stringify(updated));
+      const list: any[] = saved ? JSON.parse(saved) : [];
+      const lightweight = { ...presentation };
+      if (typeof lightweight.pdfUrl === 'string' && lightweight.pdfUrl.startsWith('data:')) {
+        delete lightweight.pdfUrl;
+      }
+      const updatedList = [...list.filter((p) => p.id !== presentation.id), lightweight];
+      localStorage.setItem('mamuthub_local_presentations', JSON.stringify(updatedList));
     } catch {
       // ignore
     }
   }
 }
 
-// Get all local presentations from IndexedDB
+// Get all local presentations from IndexedDB & LocalStorage backup
 export async function getLocalPresentations<T extends { id: string }>(): Promise<T[]> {
-  try {
-    const db = await openDB();
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction(PRESENTATIONS_STORE, 'readonly');
-      const store = tx.objectStore(PRESENTATIONS_STORE);
-      const req = store.getAll();
-      req.onsuccess = () => resolve((req.result as T[]) || []);
-      req.onerror = () => reject(req.error);
-    });
-  } catch (err) {
-    console.warn('Failed to load presentations from IndexedDB:', err);
+  const localBackup: T[] = (() => {
     try {
       const saved = localStorage.getItem('mamuthub_local_presentations');
       return saved ? JSON.parse(saved) : [];
     } catch {
       return [];
     }
+  })();
+
+  try {
+    const db = await openDB();
+    const idbPres = await new Promise<T[]>((resolve, reject) => {
+      const tx = db.transaction(PRESENTATIONS_STORE, 'readonly');
+      const store = tx.objectStore(PRESENTATIONS_STORE);
+      const req = store.getAll();
+      req.onsuccess = () => resolve((req.result as T[]) || []);
+      req.onerror = () => reject(req.error);
+    });
+
+    const map = new Map<string, T>();
+    localBackup.forEach((p) => map.set(p.id, p));
+    idbPres.forEach((p) => {
+      const existing = map.get(p.id);
+      map.set(p.id, existing ? { ...existing, ...p } : p);
+    });
+    return Array.from(map.values());
+  } catch (err) {
+    console.warn('Failed to load presentations from IndexedDB:', err);
+    return localBackup;
   }
 }
 
 // Delete presentation from IndexedDB
 export async function deleteLocalPresentation(id: string): Promise<void> {
+  try {
+    const saved = localStorage.getItem('mamuthub_local_presentations');
+    if (saved) {
+      const list: any[] = JSON.parse(saved);
+      const updated = list.filter((p) => p.id !== id);
+      localStorage.setItem('mamuthub_local_presentations', JSON.stringify(updated));
+    }
+  } catch {
+    // ignore
+  }
   try {
     const db = await openDB();
     return new Promise((resolve, reject) => {
