@@ -220,7 +220,11 @@ export default function App() {
             const lp = map.get(fp.id);
             const isFav = favIds.includes(fp.id) || (lp ? !!lp.isFavorite : !!fp.isFavorite);
 
-            const assets = await loadPresentationAssets(fp.id);
+            // Skip fetching Firestore asset documents if IndexedDB already has complete binary data
+            let assets: { pdfUrl?: string; extractedImages?: string[] } = {};
+            if (!lp || (!lp.pdfUrl && (!lp.extractedImages || lp.extractedImages.length === 0))) {
+              assets = await loadPresentationAssets(fp.id);
+            }
 
             if (lp) {
               const merged: Presentation = {

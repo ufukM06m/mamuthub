@@ -7,10 +7,14 @@ import {
   onSnapshot,
   getDocs,
   writeBatch,
-  query,
-  where,
 } from 'firebase/firestore';
-import { db } from './firebase';
+import { ref, getDownloadURL } from 'firebase/storage';
+import { db, storage } from './firebase';
+import {
+  uploadPdfToStorage,
+  uploadSlideImagesToStorage,
+  deletePresentationFromStorage,
+} from './firebaseStorageService';
 
 let isFirestoreQuotaExceeded = false;
 type QuotaListener = (isQuota: boolean) => void;
@@ -166,10 +170,19 @@ export async function purgeAllFirestorePresentations(): Promise<void> {
   if (isFirestoreQuotaExceeded) return;
   try {
     const presSnap = await getDocs(collection(db, 'presentations'));
-    await Promise.all(presSnap.docs.map((d) => deleteDoc(d.ref).catch(() => {})));
+    await Promise.all(
+      presSnap.docs.map(async (d) => {
+        deletePresentationFromStorage(d.id).catch(() => {});
+        return deleteDoc(d.ref).catch(() => {});
+      })
+    );
 
-    const assetsSnap = await getDocs(collection(db, 'presentation_assets'));
-    await Promise.all(assetsSnap.docs.map((d) => deleteDoc(d.ref).catch(() => {})));
+    try {
+      const assetsSnap = await getDocs(collection(db, 'presentation_assets'));
+      await Promise.all(assetsSnap.docs.map((d) => deleteDoc(d.ref).catch(() => {})));
+    } catch {
+      // ignore
+    }
 
     assetMemoryCache.clear();
   } catch (err) {
@@ -183,12 +196,44 @@ export function clearPresentationAssetCache(presId: string): void {
   assetMemoryCache.delete(presId);
 }
 
-// Save large presentation assets in active memory cache (local IndexedDB holds permanent copy)
-export async function savePresentationAssets(presId: string, pdfUrl?: string, extractedImages?: string[]): Promise<void> {
-  assetMemoryCache.set(presId, { pdfUrl, extractedImages });
+// Save presentation assets directly to Firebase Cloud Storage (0 Firestore read/write quota spent for chunks)
+export async function savePresentationAssets(
+  presId: string,
+  pdfUrl?: string,
+  extractedImages?: string[]
+): Promise<{ pdfUrl?: string; extractedImages?: string[] }> {
+  let finalPdfUrl = pdfUrl;
+  let finalImages = extractedImages;
+
+  try {
+    // 1. Upload Base64 PDF to Cloud Storage
+    if (pdfUrl && pdfUrl.startsWith('data:')) {
+      const storagePdfUrl = await uploadPdfToStorage(presId, pdfUrl);
+      if (storagePdfUrl) {
+        finalPdfUrl = storagePdfUrl;
+      }
+    }
+
+    // 2. Upload Base64 Slide Images to Cloud Storage
+    if (extractedImages && extractedImages.length > 0) {
+      const hasBase64 = extractedImages.some((img) => typeof img === 'string' && img.startsWith('data:image/'));
+      if (hasBase64) {
+        const storageSlideUrls = await uploadSlideImagesToStorage(presId, extractedImages);
+        if (storageSlideUrls && storageSlideUrls.length > 0) {
+          finalImages = storageSlideUrls;
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('Cloud Storage asset save warning:', err);
+  }
+
+  const result = { pdfUrl: finalPdfUrl, extractedImages: finalImages };
+  assetMemoryCache.set(presId, result);
+  return result;
 }
 
-// Load presentation assets from RAM cache, IndexedDB, or Firestore
+// Load presentation assets from Memory Cache, IndexedDB, or Firebase Storage (0 Firestore reads!)
 export async function loadPresentationAssets(presId: string): Promise<{ pdfUrl?: string; extractedImages?: string[] }> {
   if (assetMemoryCache.has(presId)) {
     const cached = assetMemoryCache.get(presId)!;
@@ -233,75 +278,20 @@ export async function loadPresentationAssets(presId: string): Promise<{ pdfUrl?:
     // ignore
   }
 
-  if (isFirestoreQuotaExceeded) return {};
-
+  // Check Cloud Storage directly via getDownloadURL (0 Firestore read units consumed!)
   try {
-    const fetchPromise = (async () => {
-      let pdfUrl: string | undefined;
-      const chunkMap = new Map<number, string>();
-      const slideMap = new Map<number, string>();
+    const pdfRef = ref(storage, `presentations/${presId}/document.pdf`);
+    const storagePdfUrl = await getDownloadURL(pdfRef).catch(() => undefined);
 
-      const q = query(collection(db, 'presentation_assets'), where('presId', '==', presId));
-      const snapshot = await getDocs(q);
-
-      if (snapshot.empty) {
-        return {};
-      }
-
-      snapshot.docs.forEach((docSnap) => {
-        const data = docSnap.data();
-        const id = docSnap.id;
-
-        if (id === `${presId}_pdf`) {
-          pdfUrl = data.data;
-        } else if (id.startsWith(`${presId}_pdf_`)) {
-          const idx = data.index !== undefined ? Number(data.index) : parseInt(id.replace(`${presId}_pdf_`, ''), 10);
-          if (!isNaN(idx) && data.chunk) {
-            chunkMap.set(idx, data.chunk);
-          }
-        } else if (id.startsWith(`${presId}_slide_`)) {
-          const idx = data.slideIndex !== undefined ? Number(data.slideIndex) : parseInt(id.replace(`${presId}_slide_`, ''), 10);
-          if (!isNaN(idx) && data.data) {
-            slideMap.set(idx, data.data);
-          }
-        }
-      });
-
-      if (chunkMap.size > 0) {
-        const sortedIndexes = Array.from(chunkMap.keys()).sort((a, b) => a - b);
-        pdfUrl = sortedIndexes.map((idx) => chunkMap.get(idx)).join('');
-      }
-
-      let sortedImages: string[] | undefined;
-      if (slideMap.size > 0) {
-        const sortedSlideIndexes = Array.from(slideMap.keys()).sort((a, b) => a - b);
-        sortedImages = sortedSlideIndexes.map((idx) => slideMap.get(idx)!);
-      }
-
-      const result = {
-        pdfUrl: pdfUrl || undefined,
-        extractedImages: sortedImages,
-      };
-
-      if (result.pdfUrl || (result.extractedImages && result.extractedImages.length > 0)) {
-        assetMemoryCache.set(presId, result);
-      }
-
+    if (storagePdfUrl) {
+      const result = { pdfUrl: storagePdfUrl, extractedImages: undefined };
+      assetMemoryCache.set(presId, result);
       return result;
-    })();
-
-    const result = await Promise.race([
-      fetchPromise,
-      new Promise<{ pdfUrl?: string; extractedImages?: string[] }>((resolve) =>
-        setTimeout(() => resolve({}), 2000)
-      ),
-    ]);
-
-    return result;
-  } catch (err) {
-    checkQuotaError(err);
-    console.warn('Failed to load presentation assets from Firestore:', err);
-    return {};
+    }
+  } catch {
+    // ignore
   }
+
+  return {};
 }
 
