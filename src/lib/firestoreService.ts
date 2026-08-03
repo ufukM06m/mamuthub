@@ -233,8 +233,29 @@ export async function savePresentationAssets(
     try {
       const assetDocRef = doc(db, 'presentation_assets', presId);
       const payload: Record<string, any> = { updatedAt: new Date().toISOString() };
-      if (finalPdfUrl) payload.pdfUrl = finalPdfUrl;
-      if (finalImages && finalImages.length > 0) payload.extractedImages = finalImages;
+
+      if (finalImages && finalImages.length > 0) {
+        payload.extractedImages = finalImages;
+      }
+
+      if (finalPdfUrl) {
+        if (finalPdfUrl.startsWith('https://') || finalPdfUrl.startsWith('http://') || finalPdfUrl.length <= 700000) {
+          payload.pdfUrl = finalPdfUrl;
+          payload.pdfChunkCount = 0;
+        } else {
+          // Chunk large Base64 string into 500KB chunks across presentation_assets subdocuments
+          const chunkSize = 500000;
+          const chunkCount = Math.ceil(finalPdfUrl.length / chunkSize);
+          payload.pdfChunkCount = chunkCount;
+
+          for (let i = 0; i < chunkCount; i++) {
+            const chunkStr = finalPdfUrl.substring(i * chunkSize, (i + 1) * chunkSize);
+            const chunkDocRef = doc(db, 'presentation_assets', `${presId}_pdf_${i}`);
+            await setDoc(chunkDocRef, { chunk: chunkStr, index: i }, { merge: true });
+          }
+        }
+      }
+
       await setDoc(assetDocRef, payload, { merge: true });
     } catch (err) {
       console.warn('Firestore presentation_assets setDoc warning:', err);
@@ -311,8 +332,20 @@ export async function loadPresentationAssets(presId: string): Promise<{ pdfUrl?:
     const assetSnap = await getDoc(assetDocRef);
     if (assetSnap.exists()) {
       const data = assetSnap.data();
+      let assembledPdfUrl = data.pdfUrl || undefined;
+
+      if (!assembledPdfUrl && typeof data.pdfChunkCount === 'number' && data.pdfChunkCount > 0) {
+        const chunkPromises = [];
+        for (let i = 0; i < data.pdfChunkCount; i++) {
+          chunkPromises.push(getDoc(doc(db, 'presentation_assets', `${presId}_pdf_${i}`)));
+        }
+        const chunkSnaps = await Promise.all(chunkPromises);
+        const chunks = chunkSnaps.map((s) => (s.exists() ? s.data().chunk : ''));
+        assembledPdfUrl = chunks.join('');
+      }
+
       const result = {
-        pdfUrl: data.pdfUrl || undefined,
+        pdfUrl: assembledPdfUrl,
         extractedImages: Array.isArray(data.extractedImages) && data.extractedImages.length > 0 ? data.extractedImages : undefined,
       };
       if (result.pdfUrl || result.extractedImages) {

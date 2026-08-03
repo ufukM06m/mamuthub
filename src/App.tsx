@@ -1008,7 +1008,8 @@ export default function App() {
       const updated = prev.map((p) => {
         if (p.clientId === updatedClient.id) {
           const item = { ...p, clientName: updatedClient.companyName };
-          upsertItem('presentations', item);
+          saveLocalPresentation(item).catch(() => {});
+          sanitizePresentationForFirestore(item).then((s) => upsertItem('presentations', s));
           return item;
         }
         return p;
@@ -1026,7 +1027,8 @@ export default function App() {
       const updated = prev.map((p) => {
         if (p.clientId === clientId) {
           const item = { ...p, clientId: undefined, clientName: undefined };
-          upsertItem('presentations', item);
+          saveLocalPresentation(item).catch(() => {});
+          sanitizePresentationForFirestore(item).then((s) => upsertItem('presentations', s));
           return item;
         }
         return p;
@@ -1046,7 +1048,8 @@ export default function App() {
             clientId: client?.id,
             clientName: client?.companyName,
           };
-          upsertItem('presentations', item);
+          saveLocalPresentation(item).catch(() => {});
+          sanitizePresentationForFirestore(item).then((s) => upsertItem('presentations', s));
           return item;
         } else if (p.clientId === clientId) {
           const item = {
@@ -1054,7 +1057,8 @@ export default function App() {
             clientId: undefined,
             clientName: undefined,
           };
-          upsertItem('presentations', item);
+          saveLocalPresentation(item).catch(() => {});
+          sanitizePresentationForFirestore(item).then((s) => upsertItem('presentations', s));
           return item;
         }
         return p;
