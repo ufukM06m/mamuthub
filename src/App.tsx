@@ -252,14 +252,12 @@ export default function App() {
           })
         );
 
-        // 3. Fallback to initialPresentations if map is empty (e.g. fresh incognito tab & quota error)
-        if (map.size === 0) {
-          initialPresentations.forEach((p) => {
-            if (!deletedIds.includes(p.id)) {
-              map.set(p.id, p);
-            }
-          });
-        }
+        // 3. Include default initialPresentations if they haven't been deleted or overridden
+        initialPresentations.forEach((p) => {
+          if (!deletedIds.includes(p.id) && !map.has(p.id)) {
+            map.set(p.id, p);
+          }
+        });
 
         const merged = Array.from(map.values()).sort((a, b) => {
           const getTimestamp = (p: Presentation) => {

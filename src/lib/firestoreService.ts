@@ -233,6 +233,7 @@ export async function savePresentationAssets(
     try {
       const assetDocRef = doc(db, 'presentation_assets', presId);
       const payload: Record<string, any> = { updatedAt: new Date().toISOString() };
+      const promises: Promise<any>[] = [];
 
       if (finalImages && finalImages.length > 0) {
         const jsonStr = JSON.stringify(finalImages);
@@ -240,11 +241,11 @@ export async function savePresentationAssets(
           payload.extractedImages = finalImages;
           payload.slideCount = 0;
         } else {
-          // Save each slide in its own subdocument so every doc is ~80-150KB
+          // Save each slide in its own subdocument concurrently so every doc is ~80-150KB
           payload.slideCount = finalImages.length;
           for (let i = 0; i < finalImages.length; i++) {
             const slideDocRef = doc(db, 'presentation_assets', `${presId}_slide_${i}`);
-            await setDoc(slideDocRef, { image: finalImages[i], index: i }, { merge: true });
+            promises.push(setDoc(slideDocRef, { image: finalImages[i], index: i }, { merge: true }));
           }
         }
       }
@@ -254,7 +255,7 @@ export async function savePresentationAssets(
           payload.pdfUrl = finalPdfUrl;
           payload.pdfChunkCount = 0;
         } else {
-          // Chunk large Base64 string into 400KB chunks across presentation_assets subdocuments
+          // Chunk large Base64 string into 400KB chunks across presentation_assets subdocuments concurrently
           const chunkSize = 400000;
           const chunkCount = Math.ceil(finalPdfUrl.length / chunkSize);
           payload.pdfChunkCount = chunkCount;
@@ -262,12 +263,13 @@ export async function savePresentationAssets(
           for (let i = 0; i < chunkCount; i++) {
             const chunkStr = finalPdfUrl.substring(i * chunkSize, (i + 1) * chunkSize);
             const chunkDocRef = doc(db, 'presentation_assets', `${presId}_pdf_${i}`);
-            await setDoc(chunkDocRef, { chunk: chunkStr, index: i }, { merge: true });
+            promises.push(setDoc(chunkDocRef, { chunk: chunkStr, index: i }, { merge: true }));
           }
         }
       }
 
-      await setDoc(assetDocRef, payload, { merge: true });
+      promises.push(setDoc(assetDocRef, payload, { merge: true }));
+      await Promise.all(promises);
     } catch (err) {
       console.warn('Firestore presentation_assets setDoc warning:', err);
     }
