@@ -228,12 +228,25 @@ export async function savePresentationAssets(
     console.warn('Cloud Storage asset save warning:', err);
   }
 
+  // 3. Save to presentation_assets doc in Firestore so other devices/tabs can access full assets
+  if (finalPdfUrl || (finalImages && finalImages.length > 0)) {
+    try {
+      const assetDocRef = doc(db, 'presentation_assets', presId);
+      const payload: Record<string, any> = { updatedAt: new Date().toISOString() };
+      if (finalPdfUrl) payload.pdfUrl = finalPdfUrl;
+      if (finalImages && finalImages.length > 0) payload.extractedImages = finalImages;
+      await setDoc(assetDocRef, payload, { merge: true });
+    } catch (err) {
+      console.warn('Firestore presentation_assets setDoc warning:', err);
+    }
+  }
+
   const result = { pdfUrl: finalPdfUrl, extractedImages: finalImages };
   assetMemoryCache.set(presId, result);
   return result;
 }
 
-// Load presentation assets from Memory Cache, IndexedDB, or Firebase Storage (0 Firestore reads!)
+// Load presentation assets from Memory Cache, IndexedDB, Firebase Storage, or Firestore presentation_assets
 export async function loadPresentationAssets(presId: string): Promise<{ pdfUrl?: string; extractedImages?: string[] }> {
   if (assetMemoryCache.has(presId)) {
     const cached = assetMemoryCache.get(presId)!;
@@ -242,7 +255,7 @@ export async function loadPresentationAssets(presId: string): Promise<{ pdfUrl?:
     }
   }
 
-  // Check IndexedDB
+  // 1. Check IndexedDB
   try {
     if (window.indexedDB) {
       const dbReq = window.indexedDB.open('MamutHubDB', 1);
@@ -278,7 +291,7 @@ export async function loadPresentationAssets(presId: string): Promise<{ pdfUrl?:
     // ignore
   }
 
-  // Check Cloud Storage directly via getDownloadURL (0 Firestore read units consumed!)
+  // 2. Check Cloud Storage directly via getDownloadURL
   try {
     const pdfRef = ref(storage, `presentations/${presId}/document.pdf`);
     const storagePdfUrl = await getDownloadURL(pdfRef).catch(() => undefined);
@@ -287,6 +300,25 @@ export async function loadPresentationAssets(presId: string): Promise<{ pdfUrl?:
       const result = { pdfUrl: storagePdfUrl, extractedImages: undefined };
       assetMemoryCache.set(presId, result);
       return result;
+    }
+  } catch {
+    // ignore
+  }
+
+  // 3. Check Firestore presentation_assets sub-document for cross-device asset access
+  try {
+    const assetDocRef = doc(db, 'presentation_assets', presId);
+    const assetSnap = await getDoc(assetDocRef);
+    if (assetSnap.exists()) {
+      const data = assetSnap.data();
+      const result = {
+        pdfUrl: data.pdfUrl || undefined,
+        extractedImages: Array.isArray(data.extractedImages) && data.extractedImages.length > 0 ? data.extractedImages : undefined,
+      };
+      if (result.pdfUrl || result.extractedImages) {
+        assetMemoryCache.set(presId, result);
+        return result;
+      }
     }
   } catch {
     // ignore
