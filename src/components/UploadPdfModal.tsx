@@ -4,6 +4,7 @@ import { Presentation, Category } from '../types';
 import { DEFAULT_FIELDS, DEFAULT_TARGET_AUDIENCES } from '../data/mockData';
 import { createPresentationPdfDataUrl } from '../utils/pdfExport';
 import { convertPdfToImages } from '../utils/pdfRenderer';
+import { compressImageDataUrl } from '../lib/storageService';
 
 interface UploadPdfModalProps {
   categories: Category[];
@@ -84,7 +85,8 @@ export const UploadPdfModal: React.FC<UploadPdfModalProps> = ({
             setExtractedImages(result.images);
             setPageCount(result.pageCount);
             setIsAutoPageCount(true);
-            setThumbnailUrl(result.images[0]); // Use page 1 as cover thumbnail!
+            const lightThumb = await compressImageDataUrl(result.images[0], 350, 0.5);
+            setThumbnailUrl(lightThumb); // Use lightweight page 1 as cover thumbnail!
           }
         } catch (err) {
           console.warn('PDF slayt dönüştürme hatası, varsayılan PDF modunda devam ediliyor:', err);

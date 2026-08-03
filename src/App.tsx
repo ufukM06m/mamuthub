@@ -732,29 +732,30 @@ export default function App() {
     // Asynchronously sync to Firestore & Cloud Storage in background without blocking modal close
     (async () => {
       try {
+        savePresentationAssets(timeStamped.id, timeStamped.pdfUrl, timeStamped.extractedImages).catch(() => {});
         if (getIsQuotaExceeded()) {
           showToast(
-            '⚠️ Bulut kotası dolduğu için bu yükleme yalnızca bu cihazda saklandı, canlı veritabanına aktarılamadı.',
+            '⚠️ Bulut kotası dolduğu için bu yükleme yalnızca bu cihazda saklandı.',
             'warning'
           );
           return;
         }
         const sanitized = await sanitizePresentationForFirestore(timeStamped);
         const result = await upsertItem('presentations', sanitized);
-        if (!result.success || result.isQuota) {
-          showToast(
-            '⚠️ Bulut kotası dolduğu için bu yükleme yalnızca bu cihazda saklandı, canlı veritabanına aktarılamadı.',
-            'warning'
-          );
+        if (!result.success) {
+          if (result.isQuota) {
+            showToast(
+              '⚠️ Bulut kotası dolduğu için bu yükleme yalnızca bu cihazda saklandı.',
+              'warning'
+            );
+          } else {
+            console.warn('Veritabanına aktarma uyarısı:', result);
+          }
         } else {
           showToast('✅ Sunum başarıyla canlı veritabanına ve bulut depolamaya aktarıldı.', 'success');
         }
       } catch (err) {
         console.warn('Background presentation upload warning:', err);
-        showToast(
-          '⚠️ Bulut kotası dolduğu için bu yükleme yalnızca bu cihazda saklandı, canlı veritabanına aktarılamadı.',
-          'warning'
-        );
       }
     })();
   };
@@ -773,29 +774,30 @@ export default function App() {
     // Asynchronously sync to Firestore & Cloud Storage
     (async () => {
       try {
+        savePresentationAssets(timeStamped.id, timeStamped.pdfUrl, timeStamped.extractedImages).catch(() => {});
         if (getIsQuotaExceeded()) {
           showToast(
-            '⚠️ Bulut kotası dolduğu için bu değişiklik yalnızca bu cihazda saklandı, canlı veritabanına aktarılamadı.',
+            '⚠️ Bulut kotası dolduğu için bu değişiklik yalnızca bu cihazda saklandı.',
             'warning'
           );
           return;
         }
         const sanitized = await sanitizePresentationForFirestore(timeStamped);
         const result = await upsertItem('presentations', sanitized);
-        if (!result.success || result.isQuota) {
-          showToast(
-            '⚠️ Bulut kotası dolduğu için bu değişiklik yalnızca bu cihazda saklandı, canlı veritabanına aktarılamadı.',
-            'warning'
-          );
+        if (!result.success) {
+          if (result.isQuota) {
+            showToast(
+              '⚠️ Bulut kotası dolduğu için bu değişiklik yalnızca bu cihazda saklandı.',
+              'warning'
+            );
+          } else {
+            console.warn('Veritabanı güncelleme uyarısı:', result);
+          }
         } else {
           showToast('✅ Sunum güncellemeleri canlı veritabanına kaydedildi.', 'success');
         }
       } catch (err) {
         console.warn('Background presentation save warning:', err);
-        showToast(
-          '⚠️ Bulut kotası dolduğu için bu değişiklik yalnızca bu cihazda saklandı, canlı veritabanına aktarılamadı.',
-          'warning'
-        );
       }
     })();
   };

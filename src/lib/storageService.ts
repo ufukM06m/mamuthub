@@ -313,32 +313,30 @@ export async function sanitizePresentationForFirestore<T extends Record<string, 
 
   const presId = sanitized.id || 'pres_' + Date.now();
 
-  // Update memory cache
+  // Save full assets asynchronously to IndexedDB and Firestore asset collection
   savePresentationAssets(presId, pres.pdfUrl, pres.extractedImages).catch(() => {});
 
-  // 2. Try Cloud Storage Upload for PDF binary
+  // 2. Try Cloud Storage Upload for PDF binary if available; otherwise strip base64 PDF
   if (typeof sanitized.pdfUrl === 'string' && sanitized.pdfUrl.startsWith('data:')) {
     const storagePdfUrl = await uploadPdfToStorage(presId, sanitized.pdfUrl);
     if (storagePdfUrl) {
       sanitized.pdfUrl = storagePdfUrl;
     } else {
-      // Strip heavy base64 PDF binary from main Firestore document (stored locally in IndexedDB)
       delete sanitized.pdfUrl;
     }
   }
 
-  // 3. Try Cloud Storage Upload for cover Thumbnail
+  // 3. Try Cloud Storage for cover Thumbnail or aggressively compress base64 thumbnail (< 25KB)
   if (typeof sanitized.thumbnailUrl === 'string' && sanitized.thumbnailUrl.startsWith('data:image/')) {
     const storageThumbUrl = await uploadThumbnailToStorage(presId, sanitized.thumbnailUrl);
     if (storageThumbUrl) {
       sanitized.thumbnailUrl = storageThumbUrl;
     } else {
-      // Compress thumbnail to lightweight preview (~15-30KB)
-      sanitized.thumbnailUrl = await compressImageDataUrl(sanitized.thumbnailUrl, 350, 0.5);
+      sanitized.thumbnailUrl = await compressImageDataUrl(sanitized.thumbnailUrl, 320, 0.45);
     }
   }
 
-  // 4. Try Cloud Storage Upload for high-res slide images
+  // 4. Try Cloud Storage for high-res slide images; otherwise strip base64 slide images
   if (Array.isArray(sanitized.extractedImages) && sanitized.extractedImages.length > 0) {
     const hasBase64 = sanitized.extractedImages.some((img: string) => typeof img === 'string' && img.startsWith('data:image/'));
     if (hasBase64) {
@@ -346,9 +344,22 @@ export async function sanitizePresentationForFirestore<T extends Record<string, 
       if (storageSlideUrls && storageSlideUrls.length > 0) {
         sanitized.extractedImages = storageSlideUrls;
       } else {
-        // Strip heavy base64 slide images from main Firestore document (stored locally in IndexedDB)
         delete sanitized.extractedImages;
       }
+    }
+  }
+
+  // 5. Hard limit safety check: ensure main document is always under 400KB
+  const jsonSize = JSON.stringify(sanitized).length;
+  if (jsonSize > 400000) {
+    if (typeof sanitized.pdfUrl === 'string' && sanitized.pdfUrl.startsWith('data:')) {
+      delete sanitized.pdfUrl;
+    }
+    if (Array.isArray(sanitized.extractedImages)) {
+      delete sanitized.extractedImages;
+    }
+    if (typeof sanitized.thumbnailUrl === 'string' && sanitized.thumbnailUrl.length > 50000) {
+      sanitized.thumbnailUrl = await compressImageDataUrl(sanitized.thumbnailUrl, 200, 0.35);
     }
   }
 

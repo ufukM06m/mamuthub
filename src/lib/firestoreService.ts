@@ -196,7 +196,7 @@ export function clearPresentationAssetCache(presId: string): void {
   assetMemoryCache.delete(presId);
 }
 
-// Save presentation assets directly to Firebase Cloud Storage (0 Firestore read/write quota spent for chunks)
+// Save presentation assets directly to Firebase Cloud Storage or chunked presentation_assets in Firestore
 export async function savePresentationAssets(
   presId: string,
   pdfUrl?: string,
@@ -206,7 +206,7 @@ export async function savePresentationAssets(
   let finalImages = extractedImages;
 
   try {
-    // 1. Upload Base64 PDF to Cloud Storage
+    // 1. Upload Base64 PDF to Cloud Storage if available
     if (pdfUrl && pdfUrl.startsWith('data:')) {
       const storagePdfUrl = await uploadPdfToStorage(presId, pdfUrl);
       if (storagePdfUrl) {
@@ -214,7 +214,7 @@ export async function savePresentationAssets(
       }
     }
 
-    // 2. Upload Base64 Slide Images to Cloud Storage
+    // 2. Upload Base64 Slide Images to Cloud Storage if available
     if (extractedImages && extractedImages.length > 0) {
       const hasBase64 = extractedImages.some((img) => typeof img === 'string' && img.startsWith('data:image/'));
       if (hasBase64) {
@@ -235,16 +235,27 @@ export async function savePresentationAssets(
       const payload: Record<string, any> = { updatedAt: new Date().toISOString() };
 
       if (finalImages && finalImages.length > 0) {
-        payload.extractedImages = finalImages;
+        const jsonStr = JSON.stringify(finalImages);
+        if (jsonStr.length <= 400000) {
+          payload.extractedImages = finalImages;
+          payload.slideCount = 0;
+        } else {
+          // Save each slide in its own subdocument so every doc is ~80-150KB
+          payload.slideCount = finalImages.length;
+          for (let i = 0; i < finalImages.length; i++) {
+            const slideDocRef = doc(db, 'presentation_assets', `${presId}_slide_${i}`);
+            await setDoc(slideDocRef, { image: finalImages[i], index: i }, { merge: true });
+          }
+        }
       }
 
       if (finalPdfUrl) {
-        if (finalPdfUrl.startsWith('https://') || finalPdfUrl.startsWith('http://') || finalPdfUrl.length <= 700000) {
+        if (finalPdfUrl.startsWith('https://') || finalPdfUrl.startsWith('http://') || finalPdfUrl.length <= 400000) {
           payload.pdfUrl = finalPdfUrl;
           payload.pdfChunkCount = 0;
         } else {
-          // Chunk large Base64 string into 500KB chunks across presentation_assets subdocuments
-          const chunkSize = 500000;
+          // Chunk large Base64 string into 400KB chunks across presentation_assets subdocuments
+          const chunkSize = 400000;
           const chunkCount = Math.ceil(finalPdfUrl.length / chunkSize);
           payload.pdfChunkCount = chunkCount;
 
@@ -344,11 +355,22 @@ export async function loadPresentationAssets(presId: string): Promise<{ pdfUrl?:
         assembledPdfUrl = chunks.join('');
       }
 
+      let assembledImages = Array.isArray(data.extractedImages) && data.extractedImages.length > 0 ? data.extractedImages : undefined;
+
+      if (!assembledImages && typeof data.slideCount === 'number' && data.slideCount > 0) {
+        const slidePromises = [];
+        for (let i = 0; i < data.slideCount; i++) {
+          slidePromises.push(getDoc(doc(db, 'presentation_assets', `${presId}_slide_${i}`)));
+        }
+        const slideSnaps = await Promise.all(slidePromises);
+        assembledImages = slideSnaps.map((s) => (s.exists() ? s.data().image : '')).filter(Boolean);
+      }
+
       const result = {
         pdfUrl: assembledPdfUrl,
-        extractedImages: Array.isArray(data.extractedImages) && data.extractedImages.length > 0 ? data.extractedImages : undefined,
+        extractedImages: assembledImages,
       };
-      if (result.pdfUrl || result.extractedImages) {
+      if (result.pdfUrl || (result.extractedImages && result.extractedImages.length > 0)) {
         assetMemoryCache.set(presId, result);
         return result;
       }
