@@ -107,10 +107,11 @@ export async function upsertItem<T extends { id: string }>(
     const docRef = doc(db, collectionName, item.id);
     const cleanItem = JSON.parse(JSON.stringify(item));
     await setDoc(docRef, cleanItem, { merge: true });
+    console.log(`[Firestore OK] Document ${item.id} saved to '${collectionName}'`);
     return { success: true, isQuota: false };
   } catch (err) {
     const isQuota = checkQuotaError(err);
-    console.warn(`Error saving item to ${collectionName}:`, err);
+    console.error(`[Firestore ERROR] Error saving item to ${collectionName} (${item.id}):`, err);
     return { success: false, isQuota };
   }
 }
